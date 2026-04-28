@@ -214,6 +214,42 @@ func (s *NamespaceService) CanPublish(ctx context.Context, nsSlug string, userID
 	return role != "", nil
 }
 
+// TransferOwnership transfers ownership of a namespace to another existing
+// member. The current owner is demoted to "admin". Only the current owner
+// (or a system admin) may initiate the transfer.
+func (s *NamespaceService) TransferOwnership(ctx context.Context, actor *model.User, nsSlug, newOwnerHandle string) error {
+	ns, err := s.nsRepo.GetBySlug(ctx, nsSlug)
+	if err != nil || ns == nil {
+		return fmt.Errorf("namespace not found")
+	}
+
+	actorRole, err := s.nsRepo.GetMemberRole(ctx, ns.ID, actor.ID)
+	if err != nil {
+		return err
+	}
+	if actorRole != "owner" && !actor.IsAdmin() {
+		return fmt.Errorf("forbidden: only the owner can transfer ownership")
+	}
+
+	target, err := s.userRepo.GetByHandle(ctx, newOwnerHandle)
+	if err != nil || target == nil {
+		return fmt.Errorf("user not found: %s", newOwnerHandle)
+	}
+	if target.ID == ns.OwnerID {
+		return fmt.Errorf("user is already the owner")
+	}
+
+	targetRole, err := s.nsRepo.GetMemberRole(ctx, ns.ID, target.ID)
+	if err != nil {
+		return err
+	}
+	if targetRole == "" {
+		return fmt.Errorf("user is not a member of this namespace; add them first")
+	}
+
+	return s.nsRepo.TransferOwnership(ctx, ns.ID, ns.OwnerID, target.ID)
+}
+
 // Leave removes the current user from a namespace.
 // The owner cannot leave — they must transfer ownership or delete the namespace first.
 func (s *NamespaceService) Leave(ctx context.Context, user *model.User, nsSlug string) error {
