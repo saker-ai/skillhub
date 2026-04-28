@@ -80,14 +80,16 @@ func (h *SkillHandler) Publish(c *gin.Context) {
 	}
 
 	req := service.PublishRequest{
-		Slug:        c.PostForm("slug"),
-		Version:     c.PostForm("version"),
-		Changelog:   c.PostForm("changelog"),
-		DisplayName: c.PostForm("displayName"),
-		Summary:     c.PostForm("summary"),
-		Category:    c.PostForm("category"),
-		Kind:        c.PostForm("kind"),
-		Files:       files,
+		Slug:          c.PostForm("slug"),
+		Version:       c.PostForm("version"),
+		Changelog:     c.PostForm("changelog"),
+		DisplayName:   c.PostForm("displayName"),
+		Summary:       c.PostForm("summary"),
+		Category:      c.PostForm("category"),
+		Kind:          c.PostForm("kind"),
+		Visibility:    c.PostForm("visibility"),
+		NamespaceSlug: c.PostForm("namespace"),
+		Files:         files,
 	}
 	if tags := c.PostForm("tags"); tags != "" {
 		req.Tags = splitTags(tags)

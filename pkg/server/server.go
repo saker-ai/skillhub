@@ -125,6 +125,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// Namespace
 	nsRepo := repository.NewNamespaceRepo(db)
 	nsSvc := service.NewNamespaceService(nsRepo, userRepo)
+	skillSvc.SetNamespaceService(nsSvc)
 
 	// Notifications
 	notifRepo := repository.NewNotificationRepo(db)
