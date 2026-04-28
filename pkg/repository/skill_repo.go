@@ -204,6 +204,22 @@ func (r *SkillRepo) UpdateLatestVersion(ctx context.Context, skillID uuid.UUID, 
 		}).Error
 }
 
+// SetLatestVersion repoints the latest pointer without incrementing
+// versions_count. Used to recover after a yank invalidates the previous
+// latest. Pass uuid.Nil to clear when no eligible version remains.
+func (r *SkillRepo) SetLatestVersion(ctx context.Context, skillID uuid.UUID, versionID uuid.UUID) error {
+	updates := map[string]interface{}{"updated_at": time.Now()}
+	if versionID == uuid.Nil {
+		updates["latest_version_id"] = nil
+	} else {
+		updates["latest_version_id"] = versionID
+	}
+	return r.db.WithContext(ctx).
+		Model(&model.Skill{}).
+		Where("id = ?", skillID).
+		Updates(updates).Error
+}
+
 func (r *SkillRepo) IncrementDownloads(ctx context.Context, skillID uuid.UUID) error {
 	return r.db.WithContext(ctx).
 		Model(&model.Skill{}).

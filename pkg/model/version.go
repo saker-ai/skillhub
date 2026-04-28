@@ -21,6 +21,16 @@ type SkillVersion struct {
 	SHA256Hash      string          `gorm:"column:sha256_hash;type:varchar(128);not null;index" json:"sha256Hash"`
 	CreatedAt       time.Time       `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
 	SoftDeletedAt   *time.Time      `gorm:"column:soft_deleted_at" json:"softDeletedAt,omitempty"`
+
+	// YankedAt: version still installable by exact pin, but excluded from
+	// "latest" resolution and emits a warning. npm/PyPI semantics.
+	YankedAt   *time.Time `gorm:"column:yanked_at" json:"yankedAt,omitempty"`
+	YankReason *string    `gorm:"column:yank_reason;type:text" json:"yankReason,omitempty"`
+
+	// DeprecatedAt: softer than yank — version still resolves normally but
+	// installs surface a deprecation notice.
+	DeprecatedAt       *time.Time `gorm:"column:deprecated_at" json:"deprecatedAt,omitempty"`
+	DeprecationMessage *string    `gorm:"column:deprecation_message;type:text" json:"deprecationMessage,omitempty"`
 }
 
 func (SkillVersion) TableName() string { return "skill_versions" }

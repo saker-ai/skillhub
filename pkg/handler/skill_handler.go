@@ -191,6 +191,72 @@ func (h *SkillHandler) GetFile(c *gin.Context) {
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", content)
 }
 
+// YankVersion handles POST /api/v1/skills/:slug/versions/:version/yank
+func (h *SkillHandler) YankVersion(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	if err := h.svc.YankVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), req.Reason); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "version yanked"})
+}
+
+// UnyankVersion handles DELETE /api/v1/skills/:slug/versions/:version/yank
+func (h *SkillHandler) UnyankVersion(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	if err := h.svc.UnyankVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version")); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "version unyanked"})
+}
+
+// DeprecateVersion handles POST /api/v1/skills/:slug/versions/:version/deprecate
+func (h *SkillHandler) DeprecateVersion(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	var req struct {
+		Message string `json:"message"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	if err := h.svc.DeprecateVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), req.Message); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "version deprecated"})
+}
+
+// UndeprecateVersion handles DELETE /api/v1/skills/:slug/versions/:version/deprecate
+func (h *SkillHandler) UndeprecateVersion(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	if err := h.svc.UndeprecateVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version")); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "version undeprecated"})
+}
+
 // RequestPublic handles POST /api/v1/skills/:slug/request-public
 func (h *SkillHandler) RequestPublic(c *gin.Context) {
 	user := middleware.GetUser(c)
