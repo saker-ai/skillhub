@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/cinience/skillhub/pkg/metrics"
 	"github.com/cinience/skillhub/pkg/search"
 )
 
@@ -46,5 +47,6 @@ func (h *SearchHandler) Search(c *gin.Context) {
 		return
 	}
 
+	metrics.SearchQueries.Inc()
 	c.JSON(http.StatusOK, result)
 }

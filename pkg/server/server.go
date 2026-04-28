@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/cinience/skillhub/pkg/auth"
 	"github.com/cinience/skillhub/pkg/config"
 	"github.com/cinience/skillhub/pkg/gitstore"
@@ -166,6 +167,7 @@ func New(cfg *config.Config) (*Server, error) {
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestID())
 	router.Use(middleware.Logging())
+	router.Use(middleware.Metrics())
 	router.Use(middleware.SecurityHeaders())
 
 	// Well-known
@@ -206,6 +208,11 @@ func New(cfg *config.Config) (*Server, error) {
 	// Serve embedded frontend static assets
 	staticFS, _ := fs.Sub(web.StaticFS, "static/assets")
 	router.StaticFS("/assets", http.FS(staticFS))
+
+	// Prometheus scrape endpoint. Unauthenticated: in production this
+	// should sit behind network ACLs (private subnet / sidecar proxy)
+	// rather than HTTP auth — same convention as kube-state-metrics.
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Health
 	router.GET("/healthz", func(c *gin.Context) {
