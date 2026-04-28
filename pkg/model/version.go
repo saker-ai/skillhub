@@ -36,6 +36,18 @@ type SkillVersion struct {
 	// {slug, version} entries. Version is a semver range like "^1.2.0",
 	// "~1.0", or an exact "1.2.3" — stored verbatim, resolved client-side.
 	Dependencies json.RawMessage `gorm:"column:dependencies;type:text;not null;default:'[]'" json:"dependencies"`
+
+	// Sigstore signature attestation. SignatureBundle holds the raw
+	// .sigstore JSON (cosign bundle) submitted at publish; nil = unsigned.
+	// SignatureStatus tracks verification outcome:
+	//   "unsigned"   — no bundle submitted
+	//   "unverified" — bundle stored, verifier not configured or skipped
+	//   "verified"   — Fulcio cert + Rekor entry validated against fingerprint
+	//   "invalid"    — verification failed (publish is rejected, not stored)
+	SignatureBundle  *string `gorm:"column:signature_bundle;type:text" json:"signatureBundle,omitempty"`
+	SignatureStatus  string  `gorm:"column:signature_status;type:varchar(20);not null;default:'unsigned'" json:"signatureStatus"`
+	SignatureSubject *string `gorm:"column:signature_subject;type:varchar(256)" json:"signatureSubject,omitempty"`
+	SignatureIssuer  *string `gorm:"column:signature_issuer;type:varchar(256)" json:"signatureIssuer,omitempty"`
 }
 
 // SkillDependency declares a required upstream skill at a version range.

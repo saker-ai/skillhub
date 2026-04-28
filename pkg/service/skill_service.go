@@ -19,6 +19,7 @@ import (
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
 	"github.com/cinience/skillhub/pkg/search"
+	"github.com/cinience/skillhub/pkg/security"
 	"github.com/cinience/skillhub/pkg/semver"
 	"github.com/cinience/skillhub/pkg/store"
 	"gorm.io/gorm"
@@ -38,12 +39,19 @@ type SkillService struct {
 	mirrorSvc    *gitstore.MirrorService
 	auditSvc     *AuditService
 	nsSvc        *NamespaceService
+	sigVerifier  security.SignatureVerifier
 }
 
 // SetNamespaceService injects the namespace service for membership/publish checks.
 // Optional — when nil, namespace-bound publishing is disabled.
 func (s *SkillService) SetNamespaceService(ns *NamespaceService) {
 	s.nsSvc = ns
+}
+
+// SetSignatureVerifier injects a Sigstore-compatible verifier for publish-time
+// attestation checks. When nil, uploaded bundles are stored as "unverified".
+func (s *SkillService) SetSignatureVerifier(v security.SignatureVerifier) {
+	s.sigVerifier = v
 }
 
 func NewSkillService(
@@ -85,6 +93,7 @@ type PublishRequest struct {
 	NamespaceSlug string // optional team namespace
 	Files         map[string][]byte // path → content
 	Dependencies  []model.SkillDependency // declared upstream skill deps
+	SignatureBundle []byte                // optional sigstore .sigstore JSON
 }
 
 func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req PublishRequest) (*model.SkillWithOwner, *model.SkillVersion, error) {
@@ -311,18 +320,51 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		}
 	}
 
+	// Verify signature bundle if provided. Reject only on hard "invalid";
+	// "unverified" (no verifier configured) is recorded but not rejected.
+	signatureStatus := "unsigned"
+	var signatureBundlePtr, signatureSubjectPtr, signatureIssuerPtr *string
+	if len(req.SignatureBundle) > 0 {
+		verifier := s.sigVerifier
+		if verifier == nil {
+			verifier = security.NopVerifier{}
+		}
+		result, err := verifier.Verify(ctx, fingerprint, req.SignatureBundle)
+		if err != nil {
+			return nil, nil, fmt.Errorf("signature verification failed: %w", err)
+		}
+		if result.Status == "invalid" {
+			return nil, nil, fmt.Errorf("invalid signature: %s", result.Reason)
+		}
+		bundleStr := string(req.SignatureBundle)
+		signatureBundlePtr = &bundleStr
+		signatureStatus = result.Status
+		if result.Subject != "" {
+			subj := result.Subject
+			signatureSubjectPtr = &subj
+		}
+		if result.Issuer != "" {
+			iss := result.Issuer
+			signatureIssuerPtr = &iss
+		}
+	}
+
 	// Create version record
 	ver := &model.SkillVersion{
-		ID:            uuid.New(),
-		SkillID:       skill.ID,
-		Version:       version,
-		Fingerprint:   fingerprint,
-		GitCommitHash: &commitHash,
-		Files:         filesJSON,
-		Parsed:        parsedJSON,
-		CreatedBy:     user.ID,
-		SHA256Hash:    fingerprint,
-		Dependencies:  depsJSON,
+		ID:               uuid.New(),
+		SkillID:          skill.ID,
+		Version:          version,
+		Fingerprint:      fingerprint,
+		GitCommitHash:    &commitHash,
+		Files:            filesJSON,
+		Parsed:           parsedJSON,
+		CreatedBy:        user.ID,
+		SHA256Hash:       fingerprint,
+		Dependencies:     depsJSON,
+		SignatureBundle:  signatureBundlePtr,
+		SignatureStatus:  signatureStatus,
+		SignatureSubject: signatureSubjectPtr,
+		SignatureIssuer:  signatureIssuerPtr,
 	}
 	if req.Changelog != "" {
 		ver.Changelog = &req.Changelog
