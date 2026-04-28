@@ -214,6 +214,28 @@ func (s *NamespaceService) CanPublish(ctx context.Context, nsSlug string, userID
 	return role != "", nil
 }
 
+// Leave removes the current user from a namespace.
+// The owner cannot leave — they must transfer ownership or delete the namespace first.
+func (s *NamespaceService) Leave(ctx context.Context, user *model.User, nsSlug string) error {
+	ns, err := s.nsRepo.GetBySlug(ctx, nsSlug)
+	if err != nil || ns == nil {
+		return fmt.Errorf("namespace not found")
+	}
+
+	role, err := s.nsRepo.GetMemberRole(ctx, ns.ID, user.ID)
+	if err != nil {
+		return err
+	}
+	if role == "" {
+		return fmt.Errorf("you are not a member of this namespace")
+	}
+	if role == "owner" {
+		return fmt.Errorf("the owner cannot leave; transfer ownership or delete the namespace first")
+	}
+
+	return s.nsRepo.RemoveMember(ctx, ns.ID, user.ID)
+}
+
 // Delete deletes a namespace (owner only).
 func (s *NamespaceService) Delete(ctx context.Context, user *model.User, nsSlug string) error {
 	ns, err := s.nsRepo.GetBySlug(ctx, nsSlug)
