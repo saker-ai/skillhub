@@ -87,3 +87,11 @@ type Comment struct {
 }
 
 func (Comment) TableName() string { return "comments" }
+
+// CommentWithUser embeds the comment plus author display fields for list APIs.
+type CommentWithUser struct {
+	Comment
+	Handle      string  `gorm:"column:handle" json:"handle"`
+	DisplayName *string `gorm:"column:display_name" json:"displayName,omitempty"`
+	AvatarURL   *string `gorm:"column:avatar_url" json:"avatarUrl,omitempty"`
+}

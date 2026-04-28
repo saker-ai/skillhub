@@ -138,6 +138,10 @@ func New(cfg *config.Config) (*Server, error) {
 	ratingRepo := repository.NewRatingRepo(db)
 	ratingSvc := service.NewRatingService(ratingRepo, skillRepo)
 
+	// Comments
+	commentRepo := repository.NewCommentRepo(db)
+	commentSvc := service.NewCommentService(commentRepo, skillRepo, auditSvc)
+
 	// Rate Limiter
 	rateLimiter := middleware.NewRateLimiter(cfg.RateLimit)
 
@@ -153,6 +157,7 @@ func New(cfg *config.Config) (*Server, error) {
 	nsHandler := handler.NewNamespaceHandler(nsSvc)
 	notifHandler := handler.NewNotificationHandler(notifSvc)
 	ratingHandler := handler.NewRatingHandler(ratingSvc)
+	commentHandler := handler.NewCommentHandler(commentSvc)
 	oauthHandler := handler.NewOAuthHandler(oauthSvc)
 	deviceHandler := handler.NewDeviceAuthHandler(deviceSvc)
 	webhookHandler := handler.NewWebhookHandler(importSvc)
@@ -243,6 +248,7 @@ func New(cfg *config.Config) (*Server, error) {
 		public.GET("/skills/:slug/file", skillHandler.GetFile)
 		public.GET("/resolve", downloadHandler.Resolve)
 		public.GET("/skills/:slug/ratings", ratingHandler.List)
+		public.GET("/skills/:slug/comments", commentHandler.List)
 	}
 
 	// Download endpoint (with download rate limit)
@@ -295,6 +301,8 @@ func New(cfg *config.Config) (*Server, error) {
 		authed.POST("/notifications/read-all", notifHandler.MarkAllRead)
 		authed.POST("/skills/:slug/ratings", ratingHandler.Rate)
 		authed.DELETE("/skills/:slug/ratings", ratingHandler.Delete)
+		authed.POST("/skills/:slug/comments", commentHandler.Create)
+		authed.DELETE("/comments/:id", commentHandler.Delete)
 	}
 
 	// Admin endpoints
