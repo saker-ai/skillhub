@@ -185,6 +185,31 @@ func (h *NamespaceHandler) RemoveMember(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "member removed"})
 }
 
+// TransferOwnership handles POST /api/v1/namespaces/:slug/transfer
+func (h *NamespaceHandler) TransferOwnership(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	slug := c.Param("slug")
+	var req struct {
+		NewOwner string `json:"newOwner" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "newOwner is required"})
+		return
+	}
+
+	if err := h.svc.TransferOwnership(c.Request.Context(), user, slug, req.NewOwner); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "ownership transferred"})
+}
+
 // Leave handles POST /api/v1/namespaces/:slug/leave
 func (h *NamespaceHandler) Leave(c *gin.Context) {
 	user := middleware.GetUser(c)

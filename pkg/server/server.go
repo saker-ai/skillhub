@@ -269,6 +269,7 @@ func New(cfg *config.Config) (*Server, error) {
 		authed.POST("/namespaces/:slug/members", nsHandler.AddMember)
 		authed.DELETE("/namespaces/:slug/members/:handle", nsHandler.RemoveMember)
 		authed.POST("/namespaces/:slug/leave", nsHandler.Leave)
+		authed.POST("/namespaces/:slug/transfer", nsHandler.TransferOwnership)
 		authed.GET("/notifications", notifHandler.List)
 		authed.GET("/notifications/unread", notifHandler.Unread)
 		authed.POST("/notifications/:id/read", notifHandler.MarkRead)

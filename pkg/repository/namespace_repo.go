@@ -65,6 +65,14 @@ func (r *NamespaceRepo) RemoveMember(ctx context.Context, namespaceID, userID uu
 		Delete(&model.NamespaceMember{}).Error
 }
 
+// UpdateMemberRole changes a member's role in a namespace.
+func (r *NamespaceRepo) UpdateMemberRole(ctx context.Context, namespaceID, userID uuid.UUID, role string) error {
+	return r.db.WithContext(ctx).
+		Model(&model.NamespaceMember{}).
+		Where("namespace_id = ? AND user_id = ?", namespaceID, userID).
+		Update("role", role).Error
+}
+
 // GetMemberRole returns the member's role in a namespace, or "" if not a member.
 func (r *NamespaceRepo) GetMemberRole(ctx context.Context, namespaceID, userID uuid.UUID) (string, error) {
 	var member model.NamespaceMember
@@ -91,6 +99,26 @@ func (r *NamespaceRepo) ListMembers(ctx context.Context, namespaceID uuid.UUID) 
 		Order("namespace_members.created_at ASC").
 		Find(&members).Error
 	return members, err
+}
+
+// TransferOwnership atomically promotes newOwnerID to "owner" and demotes the
+// previous owner to "admin", and updates namespaces.owner_id.
+func (r *NamespaceRepo) TransferOwnership(ctx context.Context, namespaceID, oldOwnerID, newOwnerID uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.NamespaceMember{}).
+			Where("namespace_id = ? AND user_id = ?", namespaceID, newOwnerID).
+			Update("role", "owner").Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.NamespaceMember{}).
+			Where("namespace_id = ? AND user_id = ?", namespaceID, oldOwnerID).
+			Update("role", "admin").Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.Namespace{}).
+			Where("id = ?", namespaceID).
+			Update("owner_id", newOwnerID).Error
+	})
 }
 
 // Delete removes a namespace.
