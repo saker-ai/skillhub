@@ -31,6 +31,17 @@ type SkillVersion struct {
 	// installs surface a deprecation notice.
 	DeprecatedAt       *time.Time `gorm:"column:deprecated_at" json:"deprecatedAt,omitempty"`
 	DeprecationMessage *string    `gorm:"column:deprecation_message;type:text" json:"deprecationMessage,omitempty"`
+
+	// Dependencies: declared skill dependencies as a JSON array of
+	// {slug, version} entries. Version is a semver range like "^1.2.0",
+	// "~1.0", or an exact "1.2.3" — stored verbatim, resolved client-side.
+	Dependencies json.RawMessage `gorm:"column:dependencies;type:text;not null;default:'[]'" json:"dependencies"`
+}
+
+// SkillDependency declares a required upstream skill at a version range.
+type SkillDependency struct {
+	Slug    string `json:"slug"`
+	Version string `json:"version"` // semver range expression
 }
 
 func (SkillVersion) TableName() string { return "skill_versions" }

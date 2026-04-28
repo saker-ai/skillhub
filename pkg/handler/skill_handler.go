@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/cinience/skillhub/pkg/middleware"
+	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/service"
 )
 
@@ -93,6 +95,14 @@ func (h *SkillHandler) Publish(c *gin.Context) {
 	}
 	if tags := c.PostForm("tags"); tags != "" {
 		req.Tags = splitTags(tags)
+	}
+	if depsRaw := c.PostForm("dependencies"); depsRaw != "" {
+		var deps []model.SkillDependency
+		if err := json.Unmarshal([]byte(depsRaw), &deps); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid dependencies JSON: " + err.Error()})
+			return
+		}
+		req.Dependencies = deps
 	}
 
 	skill, version, err := h.svc.PublishVersion(c.Request.Context(), user, req)

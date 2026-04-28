@@ -84,6 +84,7 @@ type PublishRequest struct {
 	Visibility    string // "" | "private" | "public" — only honored on first create
 	NamespaceSlug string // optional team namespace
 	Files         map[string][]byte // path → content
+	Dependencies  []model.SkillDependency // declared upstream skill deps
 }
 
 func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req PublishRequest) (*model.SkillWithOwner, *model.SkillVersion, error) {
@@ -119,6 +120,28 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		return nil, nil, fmt.Errorf("invalid version '%s': must be valid semver (e.g. 1.0.0)", req.Version)
 	}
 	version := req.Version
+
+	// Validate declared dependencies: slug must exist, no self-dependency,
+	// version range non-empty. Range syntax is stored verbatim and resolved
+	// client-side at install time.
+	for _, dep := range req.Dependencies {
+		if dep.Slug == "" {
+			return nil, nil, fmt.Errorf("dependency slug is required")
+		}
+		if dep.Slug == req.Slug {
+			return nil, nil, fmt.Errorf("dependency '%s' cannot depend on itself", dep.Slug)
+		}
+		if dep.Version == "" {
+			return nil, nil, fmt.Errorf("dependency '%s' requires a version range", dep.Slug)
+		}
+		depSkill, err := s.skillRepo.GetBySlugOrAlias(ctx, dep.Slug)
+		if err != nil {
+			return nil, nil, fmt.Errorf("lookup dependency '%s': %w", dep.Slug, err)
+		}
+		if depSkill == nil {
+			return nil, nil, fmt.Errorf("dependency '%s' not found", dep.Slug)
+		}
+	}
 
 	// Resolve namespace if requested. Membership is required to publish.
 	var nsID *uuid.UUID
@@ -280,6 +303,14 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		return nil, nil, fmt.Errorf("git publish: %w", err)
 	}
 
+	// Serialize dependencies (default to empty array)
+	depsJSON := json.RawMessage("[]")
+	if len(req.Dependencies) > 0 {
+		if encoded, err := json.Marshal(req.Dependencies); err == nil {
+			depsJSON = encoded
+		}
+	}
+
 	// Create version record
 	ver := &model.SkillVersion{
 		ID:            uuid.New(),
@@ -291,6 +322,7 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		Parsed:        parsedJSON,
 		CreatedBy:     user.ID,
 		SHA256Hash:    fingerprint,
+		Dependencies:  depsJSON,
 	}
 	if req.Changelog != "" {
 		ver.Changelog = &req.Changelog
