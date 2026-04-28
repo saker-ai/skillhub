@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/gitstore"
+	"github.com/cinience/skillhub/pkg/metrics"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
 	"github.com/cinience/skillhub/pkg/search"
@@ -456,6 +457,8 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		s.auditSvc.Log(ctx, &user.ID, "publish", "skill_version", &ver.ID, "", "")
 	}
 
+	metrics.SkillPublished.WithLabelValues(skill.Visibility).Inc()
+
 	return skill, ver, nil
 }
 
@@ -521,6 +524,8 @@ func (s *SkillService) Download(ctx context.Context, slug, version string, ident
 			s.skillRepo.IncrementDownloads(ctx, skill.ID)
 		}
 	}
+
+	metrics.SkillDownloads.Inc()
 
 	return &DownloadResult{
 		Archive:     archive,
