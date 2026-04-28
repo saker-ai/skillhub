@@ -124,7 +124,9 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// Namespace
 	nsRepo := repository.NewNamespaceRepo(db)
+	nsInvRepo := repository.NewNamespaceInvitationRepo(db)
 	nsSvc := service.NewNamespaceService(nsRepo, userRepo)
+	nsSvc.SetInvitationRepo(nsInvRepo)
 	skillSvc.SetNamespaceService(nsSvc)
 
 	// Notifications
@@ -270,6 +272,12 @@ func New(cfg *config.Config) (*Server, error) {
 		authed.DELETE("/namespaces/:slug/members/:handle", nsHandler.RemoveMember)
 		authed.POST("/namespaces/:slug/leave", nsHandler.Leave)
 		authed.POST("/namespaces/:slug/transfer", nsHandler.TransferOwnership)
+		authed.POST("/namespaces/:slug/invitations", nsHandler.Invite)
+		authed.GET("/namespaces/:slug/invitations", nsHandler.ListInvitations)
+		authed.DELETE("/namespaces/:slug/invitations/:id", nsHandler.RevokeInvitation)
+		authed.GET("/invitations", nsHandler.MyInvitations)
+		authed.POST("/invitations/:id/accept", nsHandler.AcceptInvitation)
+		authed.POST("/invitations/:id/decline", nsHandler.DeclineInvitation)
 		authed.GET("/notifications", notifHandler.List)
 		authed.GET("/notifications/unread", notifHandler.Unread)
 		authed.POST("/notifications/:id/read", notifHandler.MarkRead)

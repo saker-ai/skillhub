@@ -73,6 +73,7 @@ func NewDB(cfg config.DatabaseConfig) (*gorm.DB, error) {
 		&model.Comment{},
 		&model.Namespace{},
 		&model.NamespaceMember{},
+		&model.NamespaceInvitation{},
 		&model.OAuthIdentity{},
 		&model.Notification{},
 		&model.Rating{},

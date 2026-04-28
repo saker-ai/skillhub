@@ -4,21 +4,32 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
 )
 
+// InvitationTTL is how long a pending invitation remains valid.
+const InvitationTTL = 14 * 24 * time.Hour
+
 var nsSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
 
 type NamespaceService struct {
 	nsRepo   *repository.NamespaceRepo
 	userRepo *repository.UserRepo
+	invRepo  *repository.NamespaceInvitationRepo
 }
 
 func NewNamespaceService(nsRepo *repository.NamespaceRepo, userRepo *repository.UserRepo) *NamespaceService {
 	return &NamespaceService{nsRepo: nsRepo, userRepo: userRepo}
+}
+
+// SetInvitationRepo wires the invitation repo. Optional — invitation endpoints
+// fail gracefully if not configured.
+func (s *NamespaceService) SetInvitationRepo(invRepo *repository.NamespaceInvitationRepo) {
+	s.invRepo = invRepo
 }
 
 // Create creates a new namespace and adds the creator as owner.
@@ -288,4 +299,162 @@ func (s *NamespaceService) Delete(ctx context.Context, user *model.User, nsSlug 
 	}
 
 	return s.nsRepo.Delete(ctx, ns.ID)
+}
+
+// Invite creates a pending invitation for an existing user to join a namespace.
+// Owner/admin only. Replaces direct AddMember for the consensual flow:
+// the invitee must accept before they get any access.
+func (s *NamespaceService) Invite(ctx context.Context, actor *model.User, nsSlug, inviteeHandle, role, message string) (*model.NamespaceInvitation, error) {
+	if s.invRepo == nil {
+		return nil, fmt.Errorf("invitation flow not configured on this server")
+	}
+
+	ns, err := s.nsRepo.GetBySlug(ctx, nsSlug)
+	if err != nil || ns == nil {
+		return nil, fmt.Errorf("namespace not found")
+	}
+
+	actorRole, err := s.nsRepo.GetMemberRole(ctx, ns.ID, actor.ID)
+	if err != nil {
+		return nil, err
+	}
+	if actorRole != "owner" && actorRole != "admin" && !actor.IsAdmin() {
+		return nil, fmt.Errorf("forbidden: only owner or admin can invite members")
+	}
+
+	if role == "" {
+		role = "member"
+	}
+	if role != "admin" && role != "member" {
+		return nil, fmt.Errorf("invited role must be 'admin' or 'member'")
+	}
+
+	invitee, err := s.userRepo.GetByHandle(ctx, inviteeHandle)
+	if err != nil || invitee == nil {
+		return nil, fmt.Errorf("user not found: %s", inviteeHandle)
+	}
+
+	existingRole, _ := s.nsRepo.GetMemberRole(ctx, ns.ID, invitee.ID)
+	if existingRole != "" {
+		return nil, fmt.Errorf("user is already a member")
+	}
+
+	if existing, _ := s.invRepo.GetPending(ctx, ns.ID, invitee.ID); existing != nil {
+		return nil, fmt.Errorf("an invitation is already pending for this user")
+	}
+
+	inv := &model.NamespaceInvitation{
+		ID:            uuid.New(),
+		NamespaceID:   ns.ID,
+		InviterID:     actor.ID,
+		InviteeID:     invitee.ID,
+		InviteeHandle: invitee.Handle,
+		Role:          role,
+		Status:        "pending",
+		ExpiresAt:     time.Now().Add(InvitationTTL),
+	}
+	if message != "" {
+		inv.Message = &message
+	}
+	if err := s.invRepo.Create(ctx, inv); err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+// ListInvitations returns invitations for a namespace, filtered by status (or all if status="").
+// Owner/admin only.
+func (s *NamespaceService) ListInvitations(ctx context.Context, actor *model.User, nsSlug, status string) ([]model.NamespaceInvitation, error) {
+	if s.invRepo == nil {
+		return nil, fmt.Errorf("invitation flow not configured on this server")
+	}
+
+	ns, err := s.nsRepo.GetBySlug(ctx, nsSlug)
+	if err != nil || ns == nil {
+		return nil, fmt.Errorf("namespace not found")
+	}
+
+	actorRole, err := s.nsRepo.GetMemberRole(ctx, ns.ID, actor.ID)
+	if err != nil {
+		return nil, err
+	}
+	if actorRole != "owner" && actorRole != "admin" && !actor.IsAdmin() {
+		return nil, fmt.Errorf("forbidden: only owner or admin can view invitations")
+	}
+
+	return s.invRepo.ListByNamespace(ctx, ns.ID, status)
+}
+
+// RevokeInvitation cancels a pending invitation. Owner/admin only.
+func (s *NamespaceService) RevokeInvitation(ctx context.Context, actor *model.User, nsSlug string, invID uuid.UUID) error {
+	if s.invRepo == nil {
+		return fmt.Errorf("invitation flow not configured on this server")
+	}
+
+	ns, err := s.nsRepo.GetBySlug(ctx, nsSlug)
+	if err != nil || ns == nil {
+		return fmt.Errorf("namespace not found")
+	}
+
+	actorRole, err := s.nsRepo.GetMemberRole(ctx, ns.ID, actor.ID)
+	if err != nil {
+		return err
+	}
+	if actorRole != "owner" && actorRole != "admin" && !actor.IsAdmin() {
+		return fmt.Errorf("forbidden: only owner or admin can revoke invitations")
+	}
+
+	inv, err := s.invRepo.GetByID(ctx, invID)
+	if err != nil || inv == nil {
+		return fmt.Errorf("invitation not found")
+	}
+	if inv.NamespaceID != ns.ID {
+		return fmt.Errorf("invitation does not belong to this namespace")
+	}
+	if inv.Status != "pending" {
+		return fmt.Errorf("invitation is not pending (status: %s)", inv.Status)
+	}
+
+	return s.invRepo.UpdateStatus(ctx, inv.ID, "revoked")
+}
+
+// ListMyInvitations returns the current user's pending invitations across all namespaces.
+func (s *NamespaceService) ListMyInvitations(ctx context.Context, user *model.User) ([]model.NamespaceInvitation, error) {
+	if s.invRepo == nil {
+		return nil, fmt.Errorf("invitation flow not configured on this server")
+	}
+	return s.invRepo.ListByInvitee(ctx, user.ID)
+}
+
+// RespondToInvitation handles accept/decline by the invitee.
+func (s *NamespaceService) RespondToInvitation(ctx context.Context, user *model.User, invID uuid.UUID, accept bool) error {
+	if s.invRepo == nil {
+		return fmt.Errorf("invitation flow not configured on this server")
+	}
+
+	inv, err := s.invRepo.GetByID(ctx, invID)
+	if err != nil || inv == nil {
+		return fmt.Errorf("invitation not found")
+	}
+	if inv.InviteeID != user.ID {
+		return fmt.Errorf("forbidden: this invitation is not yours")
+	}
+	if inv.Status != "pending" {
+		return fmt.Errorf("invitation is not pending (status: %s)", inv.Status)
+	}
+	if time.Now().After(inv.ExpiresAt) {
+		_ = s.invRepo.UpdateStatus(ctx, inv.ID, "expired")
+		return fmt.Errorf("invitation has expired")
+	}
+
+	if !accept {
+		return s.invRepo.UpdateStatus(ctx, inv.ID, "declined")
+	}
+
+	// Defensive: avoid duplicate membership if a parallel AddMember slipped in.
+	if existing, _ := s.nsRepo.GetMemberRole(ctx, inv.NamespaceID, inv.InviteeID); existing != "" {
+		return s.invRepo.UpdateStatus(ctx, inv.ID, "accepted")
+	}
+
+	return s.invRepo.AcceptAndAddMember(ctx, inv)
 }
