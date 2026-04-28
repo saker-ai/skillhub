@@ -185,6 +185,23 @@ func (h *NamespaceHandler) RemoveMember(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "member removed"})
 }
 
+// Leave handles POST /api/v1/namespaces/:slug/leave
+func (h *NamespaceHandler) Leave(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	slug := c.Param("slug")
+	if err := h.svc.Leave(c.Request.Context(), user, slug); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "left namespace"})
+}
+
 // Delete handles DELETE /api/v1/namespaces/:slug
 func (h *NamespaceHandler) Delete(c *gin.Context) {
 	user := middleware.GetUser(c)
