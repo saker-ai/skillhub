@@ -104,6 +104,16 @@ func (h *SkillHandler) Publish(c *gin.Context) {
 		}
 		req.Dependencies = deps
 	}
+	if sigRaw := c.PostForm("signature"); sigRaw != "" {
+		// Cap bundle size: real cosign bundles are ~5–20 KB; reject anything
+		// pathological to avoid filling the version row with junk.
+		const maxSigBytes = 64 * 1024
+		if len(sigRaw) > maxSigBytes {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "signature bundle exceeds 64 KB"})
+			return
+		}
+		req.SignatureBundle = []byte(sigRaw)
+	}
 
 	skill, version, err := h.svc.PublishVersion(c.Request.Context(), user, req)
 	if err != nil {
