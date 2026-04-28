@@ -1,8 +1,9 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
 import { publishSkill } from '../api/skills';
+import { listMyNamespaces, type Namespace } from '../api/namespaces';
 import CodeBlock from '../components/CodeBlock';
 import { formatDisplayName } from '../utils/displayName';
 
@@ -11,6 +12,10 @@ interface SelectedFile {
   path: string;
 }
 
+const CATEGORIES = ['general', 'devops', 'security', 'data', 'frontend', 'backend', 'infra', 'testing', 'ai'];
+const KINDS_USER = ['custom'];
+const KINDS_ADMIN = ['custom', 'builtin', 'domain', 'learned'];
+
 function isHidden(path: string) {
   return path.split('/').some(p => p.startsWith('.'));
 }
@@ -18,12 +23,19 @@ function isHidden(path: string) {
 export default function Publish() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [tab, setTab] = useState<'upload' | 'cli'>('upload');
   const [slug, setSlug] = useState('');
   const [version, setVersion] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [summary, setSummary] = useState('');
   const [tags, setTags] = useState('');
+  const [category, setCategory] = useState('general');
+  const [kind, setKind] = useState('custom');
+  const [changelog, setChangelog] = useState('');
+  const [visibility, setVisibility] = useState<'private' | 'public'>('private');
+  const [namespaceSlug, setNamespaceSlug] = useState('');
+  const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [files, setFiles] = useState<SelectedFile[]>([]);
   const [status, setStatus] = useState('');
   const [statusType, setStatusType] = useState<'error' | 'info' | 'success'>('info');
@@ -32,6 +44,13 @@ export default function Publish() {
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
   const [dragover, setDragover] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    listMyNamespaces()
+      .then(res => setNamespaces(res.data || []))
+      .catch(() => setNamespaces([]));
+  }, [user]);
 
   const addFiles = useCallback((fileList: FileList) => {
     const newFiles: SelectedFile[] = [];
@@ -80,6 +99,11 @@ export default function Publish() {
     if (displayName.trim()) formData.append('displayName', displayName.trim());
     if (summary.trim()) formData.append('summary', summary.trim());
     if (tags.trim()) formData.append('tags', tags.trim());
+    if (category) formData.append('category', category);
+    if (kind) formData.append('kind', kind);
+    if (changelog.trim()) formData.append('changelog', changelog.trim());
+    if (visibility) formData.append('visibility', visibility);
+    if (namespaceSlug) formData.append('namespace', namespaceSlug);
     files.forEach(f => formData.append('files', f.file, f.path));
 
     try {
@@ -119,6 +143,7 @@ export default function Publish() {
 
   const baseURL = window.location.origin;
   const resultTitle = result ? formatDisplayName(result.displayName, result.slug, 48) : null;
+  const availableKinds = isAdmin ? KINDS_ADMIN : KINDS_USER;
 
   return (
     <div className="container" style={{ padding: '48px 24px' }}>
@@ -138,12 +163,12 @@ export default function Publish() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <div>
                     <label className="form-label">{t('publish.slug')} *</label>
-                    <input className="form-input" required placeholder="my-awesome-skill" pattern="[a-z0-9][a-z0-9\-]*[a-z0-9]" value={slug} onChange={e => setSlug(e.target.value)} />
+                    <input className="form-input" required placeholder="my-awesome-skill" pattern="[a-z0-9][a-z0-9\-/]*[a-z0-9]" value={slug} onChange={e => setSlug(e.target.value)} />
                     <div className="form-hint">{t('publish.slug_hint')}</div>
                   </div>
                   <div>
                     <label className="form-label">{t('publish.version')} *</label>
-                    <input className="form-input" required placeholder="1.0.0" pattern="\d+\.\d+\.\d+" value={version} onChange={e => setVersion(e.target.value)} />
+                    <input className="form-input" required placeholder="1.0.0" pattern="\d+\.\d+\.\d+([-+][0-9A-Za-z.\-]+)?" value={version} onChange={e => setVersion(e.target.value)} />
                     <div className="form-hint">{t('publish.version_hint')}</div>
                   </div>
                 </div>
@@ -159,6 +184,49 @@ export default function Publish() {
                   <label className="form-label">{t('publish.tags')}</label>
                   <input className="form-input" placeholder="go, automation, tools" value={tags} onChange={e => setTags(e.target.value)} />
                   <div className="form-hint">{t('publish.tags_hint')}</div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+                  <div>
+                    <label className="form-label">{t('publish.category')}</label>
+                    <select className="form-input" value={category} onChange={e => setCategory(e.target.value)}>
+                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">{t('publish.kind')}</label>
+                    <select className="form-input" value={kind} onChange={e => setKind(e.target.value)}>
+                      {availableKinds.map(k => <option key={k} value={k}>{k}</option>)}
+                    </select>
+                    <div className="form-hint">{t('publish.kind_hint')}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+                  <div>
+                    <label className="form-label">{t('publish.visibility')}</label>
+                    <select className="form-input" value={visibility} onChange={e => setVisibility(e.target.value as 'private' | 'public')}>
+                      <option value="private">{t('publish.visibility_private')}</option>
+                      <option value="public">{t('publish.visibility_public')}</option>
+                    </select>
+                    <div className="form-hint">{t('publish.visibility_hint')}</div>
+                  </div>
+                  <div>
+                    <label className="form-label">{t('publish.namespace')}</label>
+                    <select className="form-input" value={namespaceSlug} onChange={e => setNamespaceSlug(e.target.value)}>
+                      <option value="">{t('publish.namespace_personal')}</option>
+                      {namespaces.map(n => (
+                        <option key={n.id} value={n.slug}>{n.displayName || n.slug} ({n.type})</option>
+                      ))}
+                    </select>
+                    <div className="form-hint">{t('publish.namespace_hint')}</div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 16 }}>
+                  <label className="form-label">{t('publish.changelog')}</label>
+                  <textarea className="form-input" rows={3} placeholder={t('publish.changelog_placeholder')} value={changelog} onChange={e => setChangelog(e.target.value)} style={{ resize: 'vertical', fontFamily: 'inherit' }} />
+                  <div className="form-hint">{t('publish.changelog_hint')}</div>
                 </div>
               </div>
 
@@ -231,7 +299,7 @@ export default function Publish() {
 
             <div className="card" style={{ marginBottom: 24 }}>
               <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 12 }}>{t('publish.curl_title')}</h2>
-              <CodeBlock command={`curl -X POST ${baseURL}/api/v1/skills \\\n  -H "Authorization: Bearer YOUR_TOKEN" \\\n  -F "slug=my-skill" \\\n  -F "version=1.0.0" \\\n  -F "displayName=My Skill" \\\n  -F "summary=A brief description" \\\n  -F "tags=python,automation" \\\n  -F "files=@SKILL.md" \\\n  -F "files=@prompt.md"`} />
+              <CodeBlock command={`curl -X POST ${baseURL}/api/v1/skills \\\n  -H "Authorization: Bearer YOUR_TOKEN" \\\n  -F "slug=my-skill" \\\n  -F "version=1.0.0" \\\n  -F "displayName=My Skill" \\\n  -F "summary=A brief description" \\\n  -F "tags=python,automation" \\\n  -F "category=general" \\\n  -F "changelog=Initial release" \\\n  -F "files=@SKILL.md" \\\n  -F "files=@prompt.md"`} />
             </div>
 
             <div className="card">

@@ -37,6 +37,13 @@ type SkillService struct {
 	searchClient *search.Client
 	mirrorSvc    *gitstore.MirrorService
 	auditSvc     *AuditService
+	nsSvc        *NamespaceService
+}
+
+// SetNamespaceService injects the namespace service for membership/publish checks.
+// Optional — when nil, namespace-bound publishing is disabled.
+func (s *SkillService) SetNamespaceService(ns *NamespaceService) {
+	s.nsSvc = ns
 }
 
 func NewSkillService(
@@ -66,15 +73,17 @@ func NewSkillService(
 }
 
 type PublishRequest struct {
-	Slug        string
-	Version     string
-	Changelog   string
-	DisplayName string
-	Summary     string
-	Category    string
-	Kind        string
-	Tags        []string
-	Files       map[string][]byte // path → content
+	Slug          string
+	Version       string
+	Changelog     string
+	DisplayName   string
+	Summary       string
+	Category      string
+	Kind          string
+	Tags          []string
+	Visibility    string // "" | "private" | "public" — only honored on first create
+	NamespaceSlug string // optional team namespace
+	Files         map[string][]byte // path → content
 }
 
 func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req PublishRequest) (*model.SkillWithOwner, *model.SkillVersion, error) {
@@ -111,6 +120,35 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 	}
 	version := req.Version
 
+	// Resolve namespace if requested. Membership is required to publish.
+	var nsID *uuid.UUID
+	if req.NamespaceSlug != "" {
+		if s.nsSvc == nil {
+			return nil, nil, fmt.Errorf("namespace publishing not configured on this server")
+		}
+		ns, err := s.nsSvc.GetBySlug(ctx, req.NamespaceSlug)
+		if err != nil || ns == nil {
+			return nil, nil, fmt.Errorf("namespace '%s' not found", req.NamespaceSlug)
+		}
+		can, err := s.nsSvc.CanPublish(ctx, req.NamespaceSlug, user.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("check namespace membership: %w", err)
+		}
+		if !can && !user.IsAdmin() {
+			return nil, nil, fmt.Errorf("not a member of namespace '%s'", req.NamespaceSlug)
+		}
+		nsID = &ns.ID
+	}
+
+	// Validate visibility (only public/private allowed; defaults to private on create)
+	visibility := "private"
+	if req.Visibility != "" {
+		if req.Visibility != "private" && req.Visibility != "public" {
+			return nil, nil, fmt.Errorf("visibility must be 'private' or 'public'")
+		}
+		visibility = req.Visibility
+	}
+
 	// Find or create skill
 	skill, err := s.skillRepo.GetBySlug(ctx, req.Slug)
 	if err != nil {
@@ -138,14 +176,22 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 				kind = req.Kind
 			}
 		}
+		// Public skills always start in pending_review state — only admin/moderator promotes.
+		moderation := "approved"
+		effectiveVisibility := visibility
+		if visibility == "public" && !user.IsAdmin() && !user.IsModerator() {
+			effectiveVisibility = "private"
+			moderation = "pending_review"
+		}
 		newSkill := &model.Skill{
 			ID:               uuid.New(),
 			Slug:             req.Slug,
 			OwnerID:          user.ID,
+			NamespaceID:      nsID,
 			Category:         category,
 			Tags:             model.StringArray(req.Tags),
-			Visibility:       "private",
-			ModerationStatus: "approved",
+			Visibility:       effectiveVisibility,
+			ModerationStatus: moderation,
 			Kind:             kind,
 		}
 		if req.DisplayName != "" {
