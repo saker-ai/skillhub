@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
-import { publishSkill } from '../api/skills';
+import { getSkill, getVersions } from '../api/skills';
 import { listMyNamespaces, type Namespace } from '../api/namespaces';
 import CodeBlock from '../components/CodeBlock';
 import { formatDisplayName } from '../utils/displayName';
@@ -18,6 +18,45 @@ const KINDS_ADMIN = ['custom', 'builtin', 'domain', 'learned'];
 
 function isHidden(path: string) {
   return path.split('/').some(p => p.startsWith('.'));
+}
+
+function bumpPatch(v: string): string {
+  const m = v.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return '';
+  return `${m[1]}.${m[2]}.${parseInt(m[3], 10) + 1}`;
+}
+
+interface UploadResult {
+  skill?: { slug: string; displayName?: string };
+  version?: { version: string; files?: unknown[] };
+  error?: string;
+}
+
+function uploadWithProgress(
+  url: string,
+  formData: FormData,
+  onProgress: (pct: number) => void,
+): Promise<UploadResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.withCredentials = true;
+    xhr.upload.addEventListener('progress', e => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    });
+    xhr.onload = () => {
+      let body: UploadResult = {};
+      try { body = JSON.parse(xhr.responseText); } catch { /* non-json */ }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body);
+      } else {
+        reject(new Error(body.error || `HTTP ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.ontimeout = () => reject(new Error('Upload timed out'));
+    xhr.send(formData);
+  });
 }
 
 export default function Publish() {
@@ -40,6 +79,8 @@ export default function Publish() {
   const [status, setStatus] = useState('');
   const [statusType, setStatusType] = useState<'error' | 'info' | 'success'>('info');
   const [publishing, setPublishing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [result, setResult] = useState<{ slug: string; displayName?: string; version: string; fileCount: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
@@ -76,6 +117,28 @@ export default function Publish() {
     addFiles(e.dataTransfer.files);
   }, [addFiles]);
 
+  const handleSlugBlur = useCallback(async () => {
+    const s = slug.trim();
+    if (!s) { setLatestVersion(null); return; }
+    try {
+      await getSkill(s);
+      const vs = await getVersions(s);
+      const top = vs.versions?.[0]?.version;
+      if (top) {
+        setLatestVersion(top);
+        if (!version.trim()) {
+          const next = bumpPatch(top);
+          if (next) setVersion(next);
+        }
+      } else {
+        setLatestVersion(null);
+      }
+    } catch {
+      // 404 means new skill — fine, leave as-is
+      setLatestVersion(null);
+    }
+  }, [slug, version]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!slug.trim() || !version.trim()) {
@@ -88,8 +151,16 @@ export default function Publish() {
       setStatusType('error');
       return;
     }
+    // SKILL.md is mandatory — backend will fail without it; warn early.
+    const hasSkillMd = files.some(f => f.path === 'SKILL.md' || f.path.toLowerCase().endsWith('/skill.md') || f.path.toLowerCase() === 'skill.md');
+    if (!hasSkillMd) {
+      setStatus(t('publish.missing_skill_md'));
+      setStatusType('error');
+      return;
+    }
 
     setPublishing(true);
+    setProgress(0);
     setStatus(t('publish.uploading'));
     setStatusType('info');
 
@@ -107,8 +178,9 @@ export default function Publish() {
     files.forEach(f => formData.append('files', f.file, f.path));
 
     try {
-      const data = await publishSkill(formData);
+      const data = await uploadWithProgress('/api/v1/skills', formData, p => setProgress(p));
       setStatus('');
+      setProgress(100);
       setResult({
         slug: data.skill?.slug || slug,
         displayName: data.skill?.displayName,
@@ -163,13 +235,17 @@ export default function Publish() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <div>
                     <label className="form-label">{t('publish.slug')} *</label>
-                    <input className="form-input" required placeholder="my-awesome-skill" pattern="[a-z0-9][a-z0-9\-/]*[a-z0-9]" value={slug} onChange={e => setSlug(e.target.value)} />
+                    <input className="form-input" required placeholder="my-awesome-skill" pattern="[a-z0-9][a-z0-9\-/]*[a-z0-9]" value={slug} onChange={e => setSlug(e.target.value)} onBlur={handleSlugBlur} />
                     <div className="form-hint">{t('publish.slug_hint')}</div>
                   </div>
                   <div>
                     <label className="form-label">{t('publish.version')} *</label>
                     <input className="form-input" required placeholder="1.0.0" pattern="\d+\.\d+\.\d+([-+][0-9A-Za-z.\-]+)?" value={version} onChange={e => setVersion(e.target.value)} />
-                    <div className="form-hint">{t('publish.version_hint')}</div>
+                    <div className="form-hint">
+                      {latestVersion
+                        ? t('publish.version_latest_hint', { version: latestVersion })
+                        : t('publish.version_hint')}
+                    </div>
                   </div>
                 </div>
                 <div style={{ marginTop: 16 }}>
@@ -265,11 +341,23 @@ export default function Publish() {
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                <button type="submit" className="btn btn-primary" disabled={publishing} style={{ padding: '12px 32px', fontSize: '1rem' }}>
-                  {publishing ? t('publish.publishing') : t('publish.publish_btn')}
-                </button>
-                {status && <span style={{ fontSize: '0.9rem', color: statusType === 'error' ? 'var(--danger)' : 'var(--text-muted)' }}>{status}</span>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <button type="submit" className="btn btn-primary" disabled={publishing} style={{ padding: '12px 32px', fontSize: '1rem' }}>
+                    {publishing ? t('publish.publishing') : t('publish.publish_btn')}
+                  </button>
+                  {status && <span style={{ fontSize: '0.9rem', color: statusType === 'error' ? 'var(--danger)' : 'var(--text-muted)' }}>{status}</span>}
+                </div>
+                {publishing && progress > 0 && (
+                  <div style={{ width: '100%' }}>
+                    <div style={{ height: 8, background: 'var(--bg-secondary)', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{ width: `${progress}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.2s ease' }} />
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                      {t('publish.upload_progress', { pct: progress })}
+                    </div>
+                  </div>
+                )}
               </div>
             </form>
 
