@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/middleware"
 	"github.com/cinience/skillhub/pkg/service"
 )
@@ -242,4 +243,126 @@ func (h *NamespaceHandler) Delete(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "namespace deleted"})
+}
+
+// Invite handles POST /api/v1/namespaces/:slug/invitations
+func (h *NamespaceHandler) Invite(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	slug := c.Param("slug")
+	var req struct {
+		Handle  string `json:"handle" binding:"required"`
+		Role    string `json:"role"`
+		Message string `json:"message"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "handle is required"})
+		return
+	}
+
+	inv, err := h.svc.Invite(c.Request.Context(), user, slug, req.Handle, req.Role, req.Message)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, inv)
+}
+
+// ListInvitations handles GET /api/v1/namespaces/:slug/invitations
+func (h *NamespaceHandler) ListInvitations(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	slug := c.Param("slug")
+	status := c.Query("status")
+	invs, err := h.svc.ListInvitations(c.Request.Context(), user, slug, status)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": invs})
+}
+
+// RevokeInvitation handles DELETE /api/v1/namespaces/:slug/invitations/:id
+func (h *NamespaceHandler) RevokeInvitation(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	slug := c.Param("slug")
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid invitation id"})
+		return
+	}
+
+	if err := h.svc.RevokeInvitation(c.Request.Context(), user, slug, id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "invitation revoked"})
+}
+
+// MyInvitations handles GET /api/v1/invitations
+func (h *NamespaceHandler) MyInvitations(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	invs, err := h.svc.ListMyInvitations(c.Request.Context(), user)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": invs})
+}
+
+// AcceptInvitation handles POST /api/v1/invitations/:id/accept
+func (h *NamespaceHandler) AcceptInvitation(c *gin.Context) {
+	h.respondInvitation(c, true)
+}
+
+// DeclineInvitation handles POST /api/v1/invitations/:id/decline
+func (h *NamespaceHandler) DeclineInvitation(c *gin.Context) {
+	h.respondInvitation(c, false)
+}
+
+func (h *NamespaceHandler) respondInvitation(c *gin.Context, accept bool) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid invitation id"})
+		return
+	}
+
+	if err := h.svc.RespondToInvitation(c.Request.Context(), user, id, accept); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	verb := "declined"
+	if accept {
+		verb = "accepted"
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "invitation " + verb})
 }
