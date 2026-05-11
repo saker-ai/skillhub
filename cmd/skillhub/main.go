@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/cinience/skillhub"
@@ -25,6 +26,42 @@ import (
 	_ "github.com/cinience/skillhub/pkg/store/oss"
 	_ "github.com/cinience/skillhub/pkg/store/s3"
 )
+
+// newLogger 按运行模式构造默认 *slog.Logger。
+//
+//   - serve: JSON handler + Info,因为生产环境需要结构化字段进 ELK / Loki;
+//   - 其他子命令 (admin / login / search 等): TextHandler + Info,因为 CLI
+//     使用者直接读 stderr,JSON 反而干扰可读性。
+//
+// SKILLHUB_LOG_FORMAT=json|text 与 SKILLHUB_LOG_LEVEL=debug|info|warn|error
+// 让运维 / debug 时无需改代码即可切换输出风格。
+func newLogger(serveMode bool) *slog.Logger {
+	level := slog.LevelInfo
+	if v := os.Getenv("SKILLHUB_LOG_LEVEL"); v != "" {
+		switch strings.ToLower(v) {
+		case "debug":
+			level = slog.LevelDebug
+		case "warn":
+			level = slog.LevelWarn
+		case "error":
+			level = slog.LevelError
+		}
+	}
+
+	useJSON := serveMode
+	if v := os.Getenv("SKILLHUB_LOG_FORMAT"); v != "" {
+		useJSON = strings.ToLower(v) == "json"
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	var h slog.Handler
+	if useJSON {
+		h = slog.NewJSONHandler(os.Stderr, opts)
+	} else {
+		h = slog.NewTextHandler(os.Stderr, opts)
+	}
+	return slog.New(h)
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -68,6 +105,9 @@ func main() {
 }
 
 func runServer() {
+	logger := newLogger(true)
+	slog.SetDefault(logger)
+
 	configPath := "configs/skillhub.yaml"
 	if v := os.Getenv("SKILLHUB_CONFIG"); v != "" {
 		configPath = v
@@ -75,7 +115,8 @@ func runServer() {
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		logger.Error("failed to load config", "err", err)
+		os.Exit(1)
 	}
 
 	// signal.NotifyContext 是 Go 1.16+ 的标准做法，替代手写 channel + goroutine。
@@ -83,25 +124,28 @@ func runServer() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	hub, err := skillhub.New(ctx, skillhub.WithConfig(cfg))
+	hub, err := skillhub.New(ctx, skillhub.WithConfig(cfg), skillhub.WithLogger(logger))
 	if err != nil {
-		// 不能用 log.Fatalf——上面 defer cancel() 不会跑。
-		// signal.NotifyContext 注册的 SIGINT/SIGTERM handler 也不会被解除，
-		// 但进程要立刻退出，cancel() 仅做形式上的清理。
+		// 不能用 logger.Error+os.Exit 之前先手动 cancel：上面 defer cancel() 在 os.Exit
+		// 路径不会跑，signal handler 不解除问题不大（进程立即退出），但 cancel() 让
+		// 底层的 NotifyContext goroutine 正确清理 channel。
 		cancel()
-		log.Printf("failed to create hub: %v", err)
+		logger.Error("failed to create hub", "err", err)
 		os.Exit(1)
 	}
 	defer func() { _ = hub.Close() }()
 
-	log.Printf("SkillHub starting on %s:%d", cfg.Server.Host, cfg.Server.Port)
+	logger.Info("SkillHub starting", "host", cfg.Server.Host, "port", cfg.Server.Port)
 	if err := hub.Run(ctx); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("server error: %v", err)
+		logger.Error("server error", "err", err)
+		os.Exit(1)
 	}
-	log.Println("server stopped")
+	logger.Info("server stopped")
 }
 
 func handleAdmin() {
+	logger := newLogger(false)
+
 	if len(os.Args) < 3 {
 		fmt.Println("Usage:")
 		fmt.Println("  skillhub admin create-user --handle <handle> --role <role> [--password <password>]")
@@ -116,12 +160,14 @@ func handleAdmin() {
 	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		logger.Error("failed to load config", "err", err)
+		os.Exit(1)
 	}
 
 	db, err := repository.NewDB(cfg.Database)
 	if err != nil {
-		log.Fatalf("failed to connect to database: %v", err)
+		logger.Error("failed to connect to database", "err", err)
+		os.Exit(1)
 	}
 
 	ctx := context.Background()
@@ -132,7 +178,8 @@ func handleAdmin() {
 		role := getFlag(os.Args[3:], "--role")
 		password := getFlag(os.Args[3:], "--password")
 		if handle == "" {
-			log.Fatal("--handle is required")
+			logger.Error("--handle is required")
+			os.Exit(1)
 		}
 		if role == "" {
 			role = "admin"
@@ -145,14 +192,16 @@ func handleAdmin() {
 			Role:   role,
 		}
 		if err := userRepo.Create(ctx, user); err != nil {
-			log.Fatalf("failed to create user: %v", err)
+			logger.Error("failed to create user", "err", err)
+			os.Exit(1)
 		}
 
 		if password != "" {
 			tokenRepo := repository.NewTokenRepo(db)
 			authSvc := auth.NewService(tokenRepo, userRepo)
 			if err := authSvc.SetPassword(ctx, user.ID, password); err != nil {
-				log.Fatalf("failed to set password: %v", err)
+				logger.Error("failed to set password", "err", err)
+				os.Exit(1)
 			}
 			fmt.Printf("User created: %s (ID: %s, role: %s, password set)\n", handle, user.ID, role)
 		} else {
@@ -163,7 +212,8 @@ func handleAdmin() {
 		userHandle := getFlag(os.Args[3:], "--user")
 		label := getFlag(os.Args[3:], "--label")
 		if userHandle == "" {
-			log.Fatal("--user is required")
+			logger.Error("--user is required")
+			os.Exit(1)
 		}
 		if label == "" {
 			label = "CLI"
@@ -175,12 +225,14 @@ func handleAdmin() {
 
 		user, err := userRepo.GetByHandle(ctx, userHandle)
 		if err != nil || user == nil {
-			log.Fatalf("user not found: %s", userHandle)
+			logger.Error("user not found", "handle", userHandle)
+			os.Exit(1)
 		}
 
 		rawToken, _, err := authSvc.CreateToken(ctx, user.ID, label, "full", 0)
 		if err != nil {
-			log.Fatalf("failed to create token: %v", err)
+			logger.Error("failed to create token", "err", err)
+			os.Exit(1)
 		}
 		fmt.Printf("Token created for %s:\n%s\n", userHandle, rawToken)
 
@@ -188,10 +240,12 @@ func handleAdmin() {
 		userHandle := getFlag(os.Args[3:], "--user")
 		password := getFlag(os.Args[3:], "--password")
 		if userHandle == "" {
-			log.Fatal("--user is required")
+			logger.Error("--user is required")
+			os.Exit(1)
 		}
 		if password == "" {
-			log.Fatal("--password is required")
+			logger.Error("--password is required")
+			os.Exit(1)
 		}
 
 		userRepo := repository.NewUserRepo(db)
@@ -200,11 +254,13 @@ func handleAdmin() {
 
 		user, err := userRepo.GetByHandle(ctx, userHandle)
 		if err != nil || user == nil {
-			log.Fatalf("user not found: %s", userHandle)
+			logger.Error("user not found", "handle", userHandle)
+			os.Exit(1)
 		}
 
 		if err := authSvc.SetPassword(ctx, user.ID, password); err != nil {
-			log.Fatalf("failed to set password: %v", err)
+			logger.Error("failed to set password", "err", err)
+			os.Exit(1)
 		}
 		fmt.Printf("Password set for %s\n", userHandle)
 

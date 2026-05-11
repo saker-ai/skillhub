@@ -158,6 +158,17 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 	starRepo := repository.NewStarRepo(db)
 	downloadRepo := repository.NewDownloadRepo(db)
 
+	// Skill 查询缓存 — 命中 GetBySlug / GetBySlugOrAlias，省掉 JOIN users 的开销。
+	// SkillCacheSize <= 0 → NewSkillCache 返回 nil → repo 自动绕过；不需要 if-guard。
+	if cache := repository.NewSkillCache(
+		cfg.Cache.SkillCacheSize,
+		cfg.Cache.SkillCacheTTL,
+		mx.SkillCacheHits,
+		mx.SkillCacheMisses,
+	); cache != nil {
+		skillRepo.SetCache(cache)
+	}
+
 	// Git Store (always created — Mirror and Import depend on it)
 	gs, err := gitstore.New(cfg.GitStore.BasePath)
 	if err != nil {

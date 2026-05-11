@@ -47,6 +47,12 @@ type Metrics struct {
 	// A spike here is a leading indicator of either a misbehaving CI loop minting
 	// per-build tokens, or genuine demand to raise the quota.
 	TeamTokenQuotaRejected prometheus.Counter
+
+	// SkillCacheHits / SkillCacheMisses 用来观测 SkillRepo 内嵌的 LRU 缓存效果。
+	// 命中率 = hits / (hits + misses)。低命中率（<50%）通常意味着 TTL 过短，
+	// 或者 service 层在 metadata 没变的路径上调用了 InvalidateCache。
+	SkillCacheHits   prometheus.Counter
+	SkillCacheMisses prometheus.Counter
 }
 
 // New 创建一个 Metrics 实例并注册到指定 Registerer。
@@ -107,6 +113,15 @@ func New(reg prometheus.Registerer) *Metrics {
 		TeamTokenQuotaRejected: factory.NewCounter(prometheus.CounterOpts{
 			Name: "skillhub_team_token_quota_rejected_total",
 			Help: "Count of team-token create requests rejected because the namespace already holds the maximum allowed active team tokens.",
+		}),
+
+		SkillCacheHits: factory.NewCounter(prometheus.CounterOpts{
+			Name: "skillhub_skill_cache_hits_total",
+			Help: "Count of SkillRepo cache hits served without DB roundtrip.",
+		}),
+		SkillCacheMisses: factory.NewCounter(prometheus.CounterOpts{
+			Name: "skillhub_skill_cache_misses_total",
+			Help: "Count of SkillRepo cache misses that fell through to DB.",
 		}),
 	}
 }
