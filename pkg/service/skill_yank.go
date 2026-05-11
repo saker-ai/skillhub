@@ -28,6 +28,8 @@ func (s *SkillService) YankVersion(ctx context.Context, user *model.User, slug, 
 	if err := s.repointLatest(ctx, skill.ID, ver.ID); err != nil {
 		return fmt.Errorf("repoint latest: %w", err)
 	}
+	// repointLatest 改了 latest_version_id,失效缓存让 GetBySlug 拿到新值。
+	s.skillRepo.InvalidateCache(skill.Slug)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, &user.ID, "yank", "skill_version", &ver.ID, "", reason)
 	}
@@ -51,6 +53,7 @@ func (s *SkillService) UnyankVersion(ctx context.Context, user *model.User, slug
 	if err := s.repointLatest(ctx, skill.ID, uuid.Nil); err != nil {
 		return fmt.Errorf("repoint latest: %w", err)
 	}
+	s.skillRepo.InvalidateCache(skill.Slug)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, &user.ID, "unyank", "skill_version", &ver.ID, "", "")
 	}

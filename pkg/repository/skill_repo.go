@@ -12,10 +12,28 @@ import (
 
 type SkillRepo struct {
 	db *gorm.DB
+	// cache 可能为 nil——SetCache 没被调用时所有 Get* 直接走 DB；
+	// SkillCache 的方法在 nil 接收者上安全，所以 GetBySlug 不需要写 if-guard。
+	cache *SkillCache
 }
 
 func NewSkillRepo(db *gorm.DB) *SkillRepo {
 	return &SkillRepo{db: db}
+}
+
+// SetCache 注入 *SkillCache。装配阶段调用一次即可——运行期切换没意义，
+// 且会让正在飞行的请求看到不一致的缓存语义。传 nil 等价于关闭缓存。
+func (r *SkillRepo) SetCache(c *SkillCache) {
+	r.cache = c
+}
+
+// InvalidateCache 显式清除一批 slug 的缓存条目。
+// service 层在 metadata 写入（SetVisibility / SoftDelete / Rename / 重新发布）
+// 之后必须调用——repo 自身的 mutator 拿不到 slug，service 层才有完整上下文。
+//
+// 不存在的 slug 静默跳过；缓存关闭（cache == nil）时整个调用是 noop。
+func (r *SkillRepo) InvalidateCache(slugs ...string) {
+	r.cache.Invalidate(slugs...)
 }
 
 func (r *SkillRepo) Create(ctx context.Context, skill *model.Skill) error {
@@ -23,6 +41,9 @@ func (r *SkillRepo) Create(ctx context.Context, skill *model.Skill) error {
 }
 
 func (r *SkillRepo) GetBySlug(ctx context.Context, slug string) (*model.SkillWithOwner, error) {
+	if cached, ok := r.cache.Get(slug); ok {
+		return cached, nil
+	}
 	var skill model.SkillWithOwner
 	err := r.db.WithContext(ctx).
 		Table("skills").
@@ -31,12 +52,19 @@ func (r *SkillRepo) GetBySlug(ctx context.Context, slug string) (*model.SkillWit
 		Where("skills.slug = ? AND skills.soft_deleted_at IS NULL", slug).
 		First(&skill).Error
 	if err == gorm.ErrRecordNotFound {
+		// 不缓存"不存在"——下一秒可能就有人新发布同名 skill，
+		// 缓存负命中会让新 skill 在 TTL 内不可见。
 		return nil, nil
 	}
-	return &skill, err
+	if err != nil {
+		return nil, err
+	}
+	r.cache.Set(slug, &skill)
+	return &skill, nil
 }
 
 func (r *SkillRepo) GetBySlugOrAlias(ctx context.Context, slug string) (*model.SkillWithOwner, error) {
+	// GetBySlug 自身已经走过缓存，这里直接复用。
 	skill, err := r.GetBySlug(ctx, slug)
 	if err != nil {
 		return nil, err
@@ -64,7 +92,13 @@ func (r *SkillRepo) GetBySlugOrAlias(ctx context.Context, slug string) (*model.S
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
-	return &s, err
+	if err != nil {
+		return nil, err
+	}
+	// 用 alias 旧 slug 与当前 slug 双 key 缓存：下次按旧 slug 来访问也能直接命中。
+	r.cache.Set(slug, &s)
+	r.cache.Set(s.Slug, &s)
+	return &s, nil
 }
 
 func (r *SkillRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Skill, error) {

@@ -482,6 +482,11 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		return nil, nil, err
 	}
 
+	// 失效缓存：tx 里走的是 raw `tx.Updates(&model.Skill{})`,绕过了 SkillRepo 的
+	// mutator,无法借助 repo 自身做失效。在这里显式调用,确保下一次 GetBySlug
+	// 读到的是新 latest_version_id / metadata。
+	s.skillRepo.InvalidateCache(skill.Slug)
+
 	// Index to search
 	if s.searchClient != nil {
 		skillMdContent := ""
@@ -714,6 +719,7 @@ func (s *SkillService) RequestPublic(ctx context.Context, user *model.User, slug
 	if err := s.skillRepo.SetVisibility(ctx, skill.ID, "private", "pending_review"); err != nil {
 		return err
 	}
+	s.skillRepo.InvalidateCache(skill.Slug)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, &user.ID, "request_public", "skill", &skill.ID, "", "")
 	}
@@ -737,6 +743,7 @@ func (s *SkillService) ReviewSkill(ctx context.Context, reviewerID *uuid.UUID, s
 			return err
 		}
 	}
+	s.skillRepo.InvalidateCache(skill.Slug)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, reviewerID, action, "skill", &skill.ID, "", "")
 	}
@@ -756,6 +763,7 @@ func (s *SkillService) SetSkillVisibility(ctx context.Context, adminID *uuid.UUI
 	if err := s.skillRepo.SetVisibility(ctx, skill.ID, visibility, moderationStatus); err != nil {
 		return err
 	}
+	s.skillRepo.InvalidateCache(skill.Slug)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, adminID, "set_visibility", "skill", &skill.ID, visibility, "")
 	}
@@ -819,6 +827,7 @@ func (s *SkillService) SoftDelete(ctx context.Context, user *model.User, slug st
 	if err := s.skillRepo.SoftDelete(ctx, skill.ID); err != nil {
 		return err
 	}
+	s.skillRepo.InvalidateCache(skill.Slug)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, &user.ID, "delete", "skill", &skill.ID, "", "")
 	}
@@ -837,6 +846,7 @@ func (s *SkillService) Undelete(ctx context.Context, user *model.User, slug stri
 	if err := s.skillRepo.Undelete(ctx, skill.ID); err != nil {
 		return err
 	}
+	s.skillRepo.InvalidateCache(skill.Slug)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, &user.ID, "undelete", "skill", &skill.ID, "", "")
 	}

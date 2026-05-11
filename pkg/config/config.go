@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,6 +18,7 @@ type Config struct {
 	Store     StoreConfig     `yaml:"store"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
 	Auth      AuthConfig      `yaml:"auth"`
+	Cache     CacheConfig     `yaml:"cache"`
 }
 
 type ServerConfig struct {
@@ -99,6 +101,21 @@ type AuthConfig struct {
 	OAuth       map[string]OAuthProviderConfig `yaml:"oauth"`
 }
 
+// CacheConfig 配置内存级缓存层。当前唯一消费方是 *repository.SkillRepo
+// 的 GetBySlug/GetBySlugOrAlias 路径——首页 / inspect / install 高频调用。
+//
+// SkillCacheSize <= 0 等价于关闭缓存（NewSkillCache 返回 nil；repo 自动绕过）；
+// SkillCacheTTL <= 0 时 expirable.LRU 退化为不带 TTL 的纯 LRU。
+//
+// 失效策略：service 层在 metadata 写入（visibility / moderation / soft-delete /
+// rename）时显式调用 InvalidateCache(slug)；counters（downloads / stars / ratings）
+// 不主动失效——这些字段是 denormalized cache，TTL 内的轻微落后可以接受，
+// 否则热门 skill 每次下载都会让缓存失效，命中率退化为 0。
+type CacheConfig struct {
+	SkillCacheSize int           `yaml:"skill_cache_size"` // default 1024; <=0 disables
+	SkillCacheTTL  time.Duration `yaml:"skill_cache_ttl"`  // default 5m
+}
+
 type OAuthProviderConfig struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
@@ -145,6 +162,10 @@ func DefaultConfig() *Config {
 		},
 		Auth: AuthConfig{
 			TokenPrefix: "clh_",
+		},
+		Cache: CacheConfig{
+			SkillCacheSize: 1024,
+			SkillCacheTTL:  5 * time.Minute,
 		},
 	}
 }
@@ -233,6 +254,18 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SKILLHUB_OSS_SECRET_KEY"); v != "" {
 		cfg.Store.OSS.SecretKey = v
+	}
+
+	// Cache env overrides
+	if v := os.Getenv("SKILLHUB_SKILL_CACHE_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Cache.SkillCacheSize = n
+		}
+	}
+	if v := os.Getenv("SKILLHUB_SKILL_CACHE_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Cache.SkillCacheTTL = d
+		}
 	}
 
 	// OAuth env overrides
