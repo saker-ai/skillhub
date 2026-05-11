@@ -5,12 +5,12 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/middleware"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
 	"github.com/cinience/skillhub/pkg/service"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 var validRoles = []string{"user", "moderator", "admin"}

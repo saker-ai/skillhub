@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	UserContextKey     = "user"
-	TokenScopeKey      = "token_scope"
-	TokenNamespaceKey  = "token_namespace_id" // *uuid.UUID — 当前 token 绑定的 namespace；仅在 team token 时存在
+	UserContextKey    = "user"
+	TokenScopeKey     = "token_scope"
+	TokenNamespaceKey = "token_namespace_id" // *uuid.UUID — 当前 token 绑定的 namespace；仅在 team token 时存在
 )
 
 // RequireAuth 强制要求请求必须携带可被 IdentityProvider 解析的合法身份。

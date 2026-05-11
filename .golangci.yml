@@ -1,0 +1,69 @@
+version: "2"
+
+# golangci-lint v2.x
+#
+# Strategy:
+#  - 不动 lint 默认规则集（避免「我以为禁了 X 实际加了 Y」），
+#    只通过 exclusions.rules 给「设计意图」类提示开口子；
+#  - 同种 pattern 被新文件再触发时，这里集中决定是修代码还是更新规则。
+#
+# 决策记录：
+#   1) gocritic.unnecessaryBlock @ pkg/server/routes.go：故意用 `{...}` 把同组路由聚拢，
+#      让阅读时一眼分组——属于设计意图，仅本文件豁免。
+#   2) gocritic.nestingReduce  @ pkg/auth/service.go：token 校验链在 if-嵌套里读起来
+#      最直观，强行 invert+continue 会让 happy path 被早 return 打断。
+#   3) revive.exported @ pkg/model/**, pkg/config/config.go：GORM bean 与配置结构体
+#      是模式化样板，逐个写 doc comment 收益≈0；YAML 字段名/表名即文档。
+#   4) revive.unused-parameter @ pkg/security/sigstore.go, pkg/gitstore/{gitstore,mirror}.go：
+#      实现 interface 必须保留参数签名；这类豁免按文件给。
+#   5) 测试文件放宽 errcheck/revive：测试里 `_ = setupX(t, ...)` 已是惯例。
+
+run:
+  timeout: 5m
+
+linters:
+  settings:
+    errcheck:
+      # 业界惯例的 best-effort 调用，不强求每个 Close/RemoveAll 都包 `_ =`：
+      #   - (io.Closer).Close          response.Body / file / ReadCloser 的 defer Close
+      #   - (*mime/multipart.Writer).WriteField  写入内存 buffer，物理上不会失败
+      #   - os.RemoveAll               临时目录清理，失败时下一次启动会再扫一遍
+      # 真正影响数据正确性的调用（json.Unmarshal/os.WriteFile/CreateTag/IncrementXxx）
+      # 仍逐个用 `_ =` 注释意图，避免一刀切误放走 bug。
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close             # 具体类型，io.Closer 接口豁免不覆盖
+        - (*mime/multipart.Writer).WriteField
+        - os.RemoveAll
+  exclusions:
+    rules:
+      - path: pkg/server/routes\.go
+        linters: [gocritic]
+        text: "unnecessaryBlock"
+      - path: pkg/auth/service\.go
+        linters: [gocritic]
+        text: "nestingReduce"
+      - path: pkg/model/.*\.go
+        linters: [revive]
+        text: "exported"
+      - path: pkg/config/config\.go
+        linters: [revive]
+        text: "exported"
+      - path: pkg/security/sigstore\.go
+        linters: [revive]
+        text: "unused-parameter"
+      - path: pkg/gitstore/gitstore\.go
+        linters: [revive]
+        text: "unused-parameter"
+      - path: pkg/gitstore/mirror\.go
+        linters: [revive]
+        text: "unused-parameter"
+      - path: _test\.go
+        linters: [errcheck, revive, govet]
+
+    paths:
+      - web/node_modules
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

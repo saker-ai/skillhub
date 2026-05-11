@@ -38,7 +38,7 @@ func templateString(value any) string {
 	}
 }
 
-func formatTemplateDisplayName(raw any, fallback any, maxLength int) (string, string) {
+func formatTemplateDisplayName(raw, fallback any, maxLength int) (string, string) {
 	source := normalizeTemplateWhitespace(templateString(raw))
 	if source == "" {
 		source = normalizeTemplateWhitespace(templateString(fallback))
@@ -94,7 +94,7 @@ func TemplateFuncMap() template.FuncMap {
 			return *s
 		},
 		"initial": func(s string) string {
-			if len(s) == 0 {
+			if s == "" {
 				return "?"
 			}
 			return strings.ToUpper(s[:1])
@@ -297,4 +297,3 @@ func (h *WebHandler) LoginPage(c *gin.Context) {
 		"Title": "Login",
 	})
 }
-

@@ -27,6 +27,7 @@ package skillhub
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/cinience/skillhub/pkg/config"
 	"github.com/cinience/skillhub/pkg/server"
@@ -41,6 +42,12 @@ import (
 type Hub struct {
 	cfg    *config.Config
 	server *server.Server // 阶段 4 之后会进一步拆分；阶段 2 直接复用
+
+	// closeOnce 是 Hub 层的"只关一次"保证。Hub.Run 在 ctx.Done() 时会通过
+	// Hub.Close 触发 shutdown，宿主进程 defer hub.Close() 也会调用——
+	// 让 Close 自身幂等比让下游 Server.Shutdown 处处加防御更干净。
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // New 创建一个 Hub 实例。Options 应用顺序决定优先级，后者覆盖前者。
@@ -79,7 +86,9 @@ func New(ctx context.Context, opts ...Option) (*Hub, error) {
 //
 // 嵌入方如果只用 SDK 模式不需要 HTTP，可以不调用 Run；
 // 调用 Run 时由 ctx 控制 graceful shutdown：ctx.Done() 触发后
-// 内部会调用 Server.Shutdown，并以 context.Background() 等待清理完成。
+// Run 走 Hub.Close() 路径完成清理——这样宿主进程的 defer hub.Close()
+// 第二次触发就走 sync.Once 兜底成 no-op，不会让下游 deviceSvc/oauthSvc
+// 等 close(channel) 二次执行。
 func (h *Hub) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
@@ -87,7 +96,7 @@ func (h *Hub) Run(ctx context.Context) error {
 	}()
 	select {
 	case <-ctx.Done():
-		return h.server.Shutdown(context.Background())
+		return h.Close()
 	case err := <-errCh:
 		return err
 	}
@@ -95,9 +104,13 @@ func (h *Hub) Run(ctx context.Context) error {
 
 // Close 释放所有资源：HTTP server、数据库连接、搜索索引、后台 goroutine。
 //
-// 重复调用是安全的——底层 server.Shutdown 已对 nil httpServer 做了保护。
+// 幂等：sync.Once 保证 Hub.Run 内部触发 + 宿主 defer 二次触发只会真正执行一次，
+// 第二次及之后直接返回首次缓存的错误（通常为 nil）。
 func (h *Hub) Close() error {
-	return h.server.Shutdown(context.Background())
+	h.closeOnce.Do(func() {
+		h.closeErr = h.server.Shutdown(context.Background())
+	})
+	return h.closeErr
 }
 
 // Config 返回 Hub 的配置（只读用途）。

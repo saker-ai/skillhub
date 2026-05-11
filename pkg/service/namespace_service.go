@@ -6,10 +6,10 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/metrics"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
+	"github.com/google/uuid"
 )
 
 // InvitationTTL is how long a pending invitation remains valid.

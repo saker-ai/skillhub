@@ -1,4 +1,4 @@
-.PHONY: build deps dev run setup clean help quickstart test frontend dev-frontend dev-backend
+.PHONY: build deps dev run setup clean help quickstart test lint frontend dev-frontend dev-backend
 
 # Build frontend (React + Vite)
 frontend:
@@ -86,8 +86,25 @@ clean:
 	@echo "Cleaned."
 
 # Run tests
+#
+# 排除 web/node_modules —— npm 包 flatted 顺手附带了一个 Go 实现
+# (web/node_modules/flatted/golang/pkg/flatted/flatted.go),`go test ./...`
+# 会把它当成项目包扫;过滤掉之后测试输出干净、跑得也快。
+# 不能用 web/go.mod 隔离,因为父模块 import "github.com/cinience/skillhub/web"
+# 取 embed.FS,加 nested go.mod 会切断这条 import。
 test:
-	go test ./...
+	go test $$(go list ./... | grep -v /web/node_modules/)
+
+# Lint
+#
+# golangci-lint run 期待文件/目录路径(不接受全限定 import path),
+# 所以用 `go list -f '{{.Dir}}'` 把包路径转成绝对目录,再过滤掉
+# web/node_modules(同 test 目标的理由)。
+lint:
+	@command -v golangci-lint >/dev/null 2>&1 || { \
+		echo "golangci-lint not installed: https://golangci-lint.run/usage/install/"; exit 1; \
+	}
+	golangci-lint run $$(go list -f '{{.Dir}}' ./... | grep -v /web/node_modules/)
 
 # Show help
 help:

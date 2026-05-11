@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -103,8 +103,9 @@ func (s *Service) ValidateToken(ctx context.Context, rawToken string) (*model.Us
 				continue
 			}
 
-			// Update last used (fire and forget)
-			go s.tokenRepo.UpdateLastUsed(context.Background(), t.ID)
+			// Update last used (fire and forget) —— 写失败只丢一次时间戳，下次仍可恢复，
+			// 不希望它阻塞 hot-path 的 token 校验。
+			go func(id uuid.UUID) { _ = s.tokenRepo.UpdateLastUsed(context.Background(), id) }(t.ID)
 
 			user, err := s.userRepo.GetByID(ctx, t.UserID)
 			if err != nil {

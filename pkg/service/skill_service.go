@@ -117,19 +117,19 @@ func NewSkillService(
 }
 
 type PublishRequest struct {
-	Slug          string
-	Version       string
-	Changelog     string
-	DisplayName   string
-	Summary       string
-	Category      string
-	Kind          string
-	Tags          []string
-	Visibility    string // "" | "private" | "public" — only honored on first create
-	NamespaceSlug string // optional team namespace
-	Files         map[string][]byte // path → content
-	Dependencies  []model.SkillDependency // declared upstream skill deps
-	SignatureBundle []byte                // optional sigstore .sigstore JSON
+	Slug            string
+	Version         string
+	Changelog       string
+	DisplayName     string
+	Summary         string
+	Category        string
+	Kind            string
+	Tags            []string
+	Visibility      string                  // "" | "private" | "public" — only honored on first create
+	NamespaceSlug   string                  // optional team namespace
+	Files           map[string][]byte       // path → content
+	Dependencies    []model.SkillDependency // declared upstream skill deps
+	SignatureBundle []byte                  // optional sigstore .sigstore JSON
 
 	// TokenNamespace 由 handler 透传当前请求 token 绑定的 namespace ID(*middleware.GetTokenNamespace*)。
 	// 非 nil ⇒ 团队 token,要求目标 skill 隶属该 namespace；不一致直接 403。
@@ -577,7 +577,7 @@ func (s *SkillService) ResolveVersion(ctx context.Context, slug, version string,
 }
 
 // Download returns a zip archive for a skill version along with its fingerprint.
-func (s *SkillService) Download(ctx context.Context, slug, version string, identityHash string, viewer *model.User) (*DownloadResult, error) {
+func (s *SkillService) Download(ctx context.Context, slug, version, identityHash string, viewer *model.User) (*DownloadResult, error) {
 	skill, ver, err := s.ResolveVersion(ctx, slug, version, viewer)
 	if err != nil {
 		return nil, err
@@ -592,7 +592,8 @@ func (s *SkillService) Download(ctx context.Context, slug, version string, ident
 	if identityHash != "" {
 		isNew, _ := s.downloadRepo.RecordDownload(ctx, skill.ID, ver.ID, identityHash)
 		if isNew {
-			s.skillRepo.IncrementDownloads(ctx, skill.ID)
+			// 计数失败不影响下载本身——指标统计可容忍偶发丢失。
+			_ = s.skillRepo.IncrementDownloads(ctx, skill.ID)
 		}
 	}
 
@@ -678,7 +679,7 @@ func (s *SkillService) GetSkill(ctx context.Context, slug string, viewer *model.
 }
 
 // ListSkills returns a paginated list of skills with visibility filtering.
-func (s *SkillService) ListSkills(ctx context.Context, limit int, cursor, sort, category string, viewer *model.User) ([]model.SkillWithOwner, string, error) {
+func (s *SkillService) ListSkills(ctx context.Context, limit int, cursor, sortKey, category string, viewer *model.User) ([]model.SkillWithOwner, string, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
@@ -687,7 +688,7 @@ func (s *SkillService) ListSkills(ctx context.Context, limit int, cursor, sort, 
 		filter.ViewerID = &viewer.ID
 		filter.IsAdmin = viewer.IsModerator()
 	}
-	return s.skillRepo.List(ctx, limit, cursor, sort, filter)
+	return s.skillRepo.List(ctx, limit, cursor, sortKey, filter)
 }
 
 // ListAllSkillsForAdmin returns all skills for admin management.
@@ -878,8 +879,8 @@ func (s *SkillService) Unstar(ctx context.Context, userID uuid.UUID, slug string
 }
 
 const (
-	maxUploadFiles   = 500
-	maxFileSize      = 5 * 1024 * 1024 // 5MB per file
+	maxUploadFiles = 500
+	maxFileSize    = 5 * 1024 * 1024 // 5MB per file
 )
 
 // ReadMultipartFiles reads all files from a multipart form.
@@ -902,7 +903,7 @@ func ReadMultipartFiles(form *multipart.Form) (map[string][]byte, error) {
 				return nil, fmt.Errorf("open file %s: %w", name, err)
 			}
 			data, err := io.ReadAll(io.LimitReader(f, maxFileSize+1))
-			f.Close()
+			_ = f.Close()
 			if err != nil {
 				return nil, fmt.Errorf("read file %s: %w", name, err)
 			}
@@ -945,4 +946,3 @@ func extractFrontmatter(content []byte) json.RawMessage {
 	result, _ := json.Marshal(map[string]string{"raw": fm})
 	return result
 }
-

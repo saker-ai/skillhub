@@ -27,7 +27,7 @@ type GitStore struct {
 }
 
 func New(basePath string) (*GitStore, error) {
-	if err := os.MkdirAll(basePath, 0755); err != nil {
+	if err := os.MkdirAll(basePath, 0o755); err != nil {
 		return nil, fmt.Errorf("create git store base path: %w", err)
 	}
 	return &GitStore{basePath: basePath}, nil
@@ -50,7 +50,7 @@ func (g *GitStore) InitRepo(owner, slug string) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil // already exists
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create owner dir: %w", err)
 	}
 	_, err := git.PlainInit(path, true)
@@ -127,10 +127,10 @@ func (g *GitStore) Publish(ctx context.Context, opts PublishOpts) (string, error
 	// Write files
 	for path, content := range opts.Files {
 		fullPath := filepath.Join(tmpDir, path)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 			return "", fmt.Errorf("create dir for %s: %w", path, err)
 		}
-		if err := os.WriteFile(fullPath, content, 0644); err != nil {
+		if err := os.WriteFile(fullPath, content, 0o644); err != nil {
 			return "", fmt.Errorf("write file %s: %w", path, err)
 		}
 		if _, err := wt.Add(path); err != nil {
@@ -206,17 +206,20 @@ func (g *GitStore) Publish(ctx context.Context, opts PublishOpts) (string, error
 		return "", fmt.Errorf("create latest tag: %w", err)
 	}
 
-	// Create extra tags
+	// Create extra tags —— DeleteTag 已用 `_` 吞掉 ENOENT，CreateTag 失败要告诉调用方，
+	// 否则发布流水线会以为成功但远端缺 tag。
 	for _, tag := range opts.Tags {
 		_ = repo.DeleteTag(tag)
-		repo.CreateTag(tag, commitHash, &git.CreateTagOptions{
+		if _, err := repo.CreateTag(tag, commitHash, &git.CreateTagOptions{
 			Message: tag,
 			Tagger: &object.Signature{
 				Name:  opts.Author,
 				Email: opts.Email,
 				When:  time.Now(),
 			},
-		})
+		}); err != nil {
+			return "", fmt.Errorf("create tag %s: %w", tag, err)
+		}
 	}
 
 	return commitHash.String(), nil

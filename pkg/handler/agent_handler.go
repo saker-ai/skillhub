@@ -6,11 +6,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/auth"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type AgentHandler struct {
