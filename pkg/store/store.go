@@ -5,6 +5,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"time"
 )
 
 // Store is the abstraction for skill file storage backends (git, S3, OSS, etc.).
@@ -29,8 +30,11 @@ type Store interface {
 	Rename(owner, oldSlug, newSlug string) error
 }
 
-// sanitizeStorePath cleans a file path to prevent directory traversal in storage keys.
-func sanitizeStorePath(p string) string {
+// SanitizeStorePath cleans a file path to prevent directory traversal in storage keys.
+//
+// 阶段 3 起改为导出，便于子包（pkg/store/s3、pkg/store/oss 等）共享同一份实现，
+// 避免每个 backend 各自手写一遍逻辑导致漂移。
+func SanitizeStorePath(p string) string {
 	p = path.Clean(p)
 	p = strings.TrimPrefix(p, "/")
 	// Reject any remaining traversal
@@ -50,4 +54,17 @@ type PublishOpts struct {
 	Email   string
 	Message string   // changelog / commit message
 	Tags    []string // extra tags
+}
+
+// PublishMeta 是 object-store 类后端（S3 / OSS）写入 meta.json 的统一序列化格式。
+//
+// git backend 不使用本结构（git 直接由 commit 记录元信息）。
+// 阶段 3 起从 store 子包提升到本包以便 s3 / oss 子包共用。
+type PublishMeta struct {
+	Version   string    `json:"version"`
+	Author    string    `json:"author"`
+	Email     string    `json:"email"`
+	Message   string    `json:"message"`
+	Tags      []string  `json:"tags,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }

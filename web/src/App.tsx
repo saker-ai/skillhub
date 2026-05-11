@@ -9,6 +9,8 @@ import SkillDetail from './pages/SkillDetail';
 import Search from './pages/Search';
 import Publish from './pages/Publish';
 import Login from './pages/Login';
+import Namespaces from './pages/Namespaces';
+import NamespaceDetail from './pages/NamespaceDetail';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -34,6 +36,8 @@ export default function App() {
             <Route path="/search" element={<Search />} />
             <Route path="/publish" element={<Publish />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/namespaces" element={<Namespaces />} />
+            <Route path="/namespaces/:slug" element={<NamespaceDetail />} />
           </Route>
         </Routes>
       </BrowserRouter>

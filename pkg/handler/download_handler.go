@@ -4,22 +4,35 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
-	"log"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/cinience/skillhub/pkg/middleware"
 	"github.com/cinience/skillhub/pkg/service"
+	"github.com/gin-gonic/gin"
 )
 
 type DownloadHandler struct {
-	svc *service.SkillService
+	svc    *service.SkillService
+	logger *slog.Logger
 }
 
 func NewDownloadHandler(svc *service.SkillService) *DownloadHandler {
 	return &DownloadHandler{svc: svc}
+}
+
+// SetLogger 注入 *slog.Logger。nil 等价于走 slog.Default()。
+func (h *DownloadHandler) SetLogger(lg *slog.Logger) {
+	h.logger = lg
+}
+
+func (h *DownloadHandler) loggerOrDefault() *slog.Logger {
+	if h.logger != nil {
+		return h.logger
+	}
+	return slog.Default()
 }
 
 // Download handles GET /api/v1/download
@@ -62,7 +75,7 @@ func (h *DownloadHandler) Download(c *gin.Context) {
 	c.Header("X-Skill-Fingerprint", result.Fingerprint)
 
 	if _, err := io.Copy(c.Writer, result.Archive); err != nil {
-		log.Printf("download stream error for %s: %v", slug, err)
+		h.loggerOrDefault().Error("download stream error", "slug", slug, "err", err)
 	}
 }
 
@@ -99,7 +112,7 @@ func (h *DownloadHandler) Resolve(c *gin.Context) {
 
 	version, skill, err := h.svc.ResolveFingerprint(c.Request.Context(), fingerprint)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "resolve_fingerprint", err)
 		return
 	}
 	if version == nil {

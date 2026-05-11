@@ -583,6 +583,12 @@ Commands:
     --summary <text>            Short description
     --changelog <text>          Changelog for this version
 
+  team-token <subcmd>           Manage namespace-bound team tokens
+    list <namespace>            List active team tokens
+    create <namespace> [flags]  Create a team token (--label, --scope, --expires-in REQUIRED)
+    revoke <namespace> <id>     Revoke a team token
+  Run 'skillhub team-token help' for full flag reference.
+
 Configuration is stored in ~/.skillhub/config.yaml
 Installed skills are stored in ~/.skillhub/skills/ (configurable via skills_dir in config.yaml)`)
 }

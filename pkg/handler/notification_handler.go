@@ -34,7 +34,7 @@ func (h *NotificationHandler) List(c *gin.Context) {
 
 	notifications, nextCursor, err := h.svc.List(c.Request.Context(), user.ID, limit, cursor)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "list_notifications", err)
 		return
 	}
 
@@ -54,7 +54,7 @@ func (h *NotificationHandler) Unread(c *gin.Context) {
 
 	count, err := h.svc.CountUnread(c.Request.Context(), user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "count_unread_notifications", err)
 		return
 	}
 
@@ -76,7 +76,7 @@ func (h *NotificationHandler) MarkRead(c *gin.Context) {
 	}
 
 	if err := h.svc.MarkRead(c.Request.Context(), id, user.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "mark_notification_read", err)
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *NotificationHandler) MarkAllRead(c *gin.Context) {
 	}
 
 	if err := h.svc.MarkAllRead(c.Request.Context(), user.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "mark_all_notifications_read", err)
 		return
 	}
 

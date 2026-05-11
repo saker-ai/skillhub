@@ -1,0 +1,233 @@
+package server
+
+import (
+	"io/fs"
+	"net/http"
+	"strings"
+
+	"github.com/cinience/skillhub/pkg/middleware"
+	"github.com/cinience/skillhub/web"
+	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+// RegisterRoutes 把 SkillHub 的全部 HTTP API 挂到给定 router 上。
+//
+// 适用场景：
+//
+//	standalone — Run() 内部自己创建 gin.Engine 后调用本方法（兼容历史行为）。
+//	embedded   — 嵌入方传入自己已有的 gin.Engine 或 RouterGroup，
+//	             把 SkillHub 路由挂到任意子路径下。
+//
+// 路由列表（路径与历史行为完全一致）：
+//
+//	GET  /.well-known/clawhub.json
+//	GET  /auth/:provider                          OAuth login redirect
+//	GET  /auth/:provider/callback                 OAuth callback
+//	*    /auth/device/{code,verify,token}         device-flow login (rate limited)
+//	*    /api/v1/auth/device/{code,verify,token}  CLI device-flow alias
+//	POST /login, /logout                          web cookie session
+//	GET  /metrics                                 prometheus scrape
+//	GET  /healthz, /readyz                        liveness / readiness
+//	GET  /api/v1/...                              public + download + authed + admin
+//	POST /api/v1/agent/provision                  agent auto-provision
+//	POST /api/v1/webhooks/{github,gitlab,gitea}   import webhooks
+//
+// 不包含静态资源与 SPA 兜底——那部分由 RegisterStatic 单独负责，
+// 因为它需要 *gin.Engine（router.NoRoute 不在 IRouter 接口上）。
+//
+// 嵌入方如果不希望某些路由出现，可以选择不调用本方法、改为只手动挂自己关心的子集
+// （目前 SkillHub 暂不提供细粒度路由开关——按 KISS 原则等真正出现需求再加）。
+func (s *Server) RegisterRoutes(r gin.IRouter) {
+	// Well-known
+	r.GET("/.well-known/clawhub.json", s.h.wellKnown.ClawHubJSON)
+
+	// Agent-readable install/operations guide.
+	// Discoverable via "Read https://<host>/skills.md and follow the instructions".
+	r.GET("/skills.md", s.h.wellKnown.InstallMarkdown)
+
+	// OpenAPI 3.1 spec + Swagger UI.
+	//   /api/v1/openapi.{yaml,json}  机器可读规范（同一份 YAML 两种格式）
+	//   /api/docs                    浏览器友好的 Swagger UI（CDN）
+	// 公开访问、不需要鉴权——契约本身不泄露任何用户数据。
+	r.GET("/api/v1/openapi.yaml", s.h.openapi.SpecYAML)
+	r.GET("/api/v1/openapi.json", s.h.openapi.SpecJSON)
+	r.GET("/api/docs", s.h.openapi.UI)
+
+	// OAuth routes
+	r.GET("/auth/:provider", s.h.oauth.Redirect)
+	r.GET("/auth/:provider/callback", s.h.oauth.Callback)
+
+	// Device auth routes (rate-limited to prevent DoS)
+	deviceRoutes := r.Group("/auth/device")
+	deviceRoutes.Use(s.rateLimiter.RateLimit("write"))
+	{
+		deviceRoutes.POST("/code", s.h.device.RequestCode)
+		deviceRoutes.GET("/verify", middleware.OptionalAuth(s.idp), s.h.device.VerifyPage)
+		deviceRoutes.POST("/verify", middleware.RequireAuth(s.idp), s.h.device.VerifySubmit)
+		deviceRoutes.POST("/token", s.h.device.PollToken)
+	}
+
+	// API v1 device auth aliases — animus CLI & other API clients expect /api/v1 prefix.
+	// Same handlers, different mount point.
+	apiDeviceRoutes := r.Group("/api/v1/auth/device")
+	apiDeviceRoutes.Use(s.rateLimiter.RateLimit("write"))
+	{
+		apiDeviceRoutes.POST("/code", s.h.device.RequestCode)
+		apiDeviceRoutes.POST("/verify", middleware.RequireAuth(s.idp), s.h.device.VerifySubmit)
+		apiDeviceRoutes.POST("/token", s.h.device.PollToken)
+	}
+
+	// Login/logout routes (server-side cookie management)
+	webRoutes := r.Group("")
+	webRoutes.Use(middleware.OptionalAuth(s.idp))
+	{
+		webRoutes.POST("/login", s.rateLimiter.RateLimit("write"), s.h.webAuth.LoginSubmit)
+		webRoutes.POST("/logout", s.h.webAuth.Logout)
+	}
+
+	// Prometheus scrape endpoint. Unauthenticated: in production this
+	// should sit behind network ACLs (private subnet / sidecar proxy)
+	// rather than HTTP auth — same convention as kube-state-metrics.
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// Health
+	r.GET("/healthz", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
+	r.GET("/readyz", func(c *gin.Context) {
+		sqlDB, err := s.db.DB()
+		if err != nil || sqlDB.Ping() != nil {
+			c.JSON(503, gin.H{"status": "not ready"})
+			return
+		}
+		c.JSON(200, gin.H{"status": "ready"})
+	})
+
+	// API v1
+	api := r.Group("/api/v1")
+
+	// Public endpoints (with read rate limit)
+	public := api.Group("")
+	public.Use(s.rateLimiter.RateLimit("read"))
+	public.Use(middleware.OptionalAuth(s.idp))
+	{
+		public.GET("/search", s.h.search.Search)
+		public.GET("/skills", s.h.skill.List)
+		public.GET("/skills/:slug", s.h.skill.Get)
+		public.GET("/skills/:slug/versions", s.h.skill.Versions)
+		public.GET("/skills/:slug/versions/:version", s.h.skill.Version)
+		public.GET("/skills/:slug/file", s.h.skill.GetFile)
+		public.GET("/resolve", s.h.download.Resolve)
+		public.GET("/skills/:slug/ratings", s.h.rating.List)
+		public.GET("/skills/:slug/comments", s.h.comment.List)
+	}
+
+	// Download endpoint (with download rate limit)
+	download := api.Group("")
+	download.Use(s.rateLimiter.RateLimit("download"))
+	download.Use(middleware.OptionalAuth(s.idp))
+	{
+		download.GET("/download", s.h.download.Download)
+	}
+
+	// Authenticated endpoints (with write rate limit and scope enforcement)
+	authed := api.Group("")
+	authed.Use(middleware.RequireAuth(s.idp))
+	authed.Use(middleware.RequireScope())
+	authed.Use(s.rateLimiter.RateLimit("write"))
+	{
+		authed.GET("/whoami", s.h.auth.WhoAmI)
+		authed.POST("/skills", s.h.skill.Publish)
+		authed.DELETE("/skills/:slug", s.h.skill.Delete)
+		authed.POST("/skills/:slug/undelete", s.h.skill.Undelete)
+		authed.POST("/skills/:slug/request-public", s.h.skill.RequestPublic)
+		authed.POST("/skills/:slug/versions/:version/yank", s.h.skill.YankVersion)
+		authed.DELETE("/skills/:slug/versions/:version/yank", s.h.skill.UnyankVersion)
+		authed.POST("/skills/:slug/versions/:version/deprecate", s.h.skill.DeprecateVersion)
+		authed.DELETE("/skills/:slug/versions/:version/deprecate", s.h.skill.UndeprecateVersion)
+		authed.POST("/stars/:slug", s.h.star.Star)
+		authed.DELETE("/stars/:slug", s.h.star.Unstar)
+		authed.GET("/tokens", s.h.token.List)
+		authed.POST("/tokens", s.h.token.Create)
+		authed.DELETE("/tokens/:id", s.h.token.Revoke)
+		authed.POST("/namespaces", s.h.namespace.Create)
+		authed.GET("/namespaces", s.h.namespace.List)
+		authed.GET("/namespaces/:slug", s.h.namespace.Get)
+		authed.PUT("/namespaces/:slug", s.h.namespace.Update)
+		authed.DELETE("/namespaces/:slug", s.h.namespace.Delete)
+		authed.POST("/namespaces/:slug/tokens", s.h.token.CreateForNamespace)
+		authed.GET("/namespaces/:slug/tokens", s.h.token.ListForNamespace)
+		authed.DELETE("/namespaces/:slug/tokens/:id", s.h.token.RevokeFromNamespace)
+		authed.GET("/namespaces/:slug/members", s.h.namespace.ListMembers)
+		authed.POST("/namespaces/:slug/members", s.h.namespace.AddMember)
+		authed.DELETE("/namespaces/:slug/members/:handle", s.h.namespace.RemoveMember)
+		authed.POST("/namespaces/:slug/leave", s.h.namespace.Leave)
+		authed.POST("/namespaces/:slug/transfer", s.h.namespace.TransferOwnership)
+		authed.POST("/namespaces/:slug/invitations", s.h.namespace.Invite)
+		authed.GET("/namespaces/:slug/invitations", s.h.namespace.ListInvitations)
+		authed.DELETE("/namespaces/:slug/invitations/:id", s.h.namespace.RevokeInvitation)
+		authed.GET("/invitations", s.h.namespace.MyInvitations)
+		authed.POST("/invitations/:id/accept", s.h.namespace.AcceptInvitation)
+		authed.POST("/invitations/:id/decline", s.h.namespace.DeclineInvitation)
+		authed.GET("/notifications", s.h.notif.List)
+		authed.GET("/notifications/unread", s.h.notif.Unread)
+		authed.POST("/notifications/:id/read", s.h.notif.MarkRead)
+		authed.POST("/notifications/read-all", s.h.notif.MarkAllRead)
+		authed.POST("/skills/:slug/ratings", s.h.rating.Rate)
+		authed.DELETE("/skills/:slug/ratings", s.h.rating.Delete)
+		authed.POST("/skills/:slug/comments", s.h.comment.Create)
+		authed.DELETE("/comments/:id", s.h.comment.Delete)
+	}
+
+	// Admin endpoints
+	admin := api.Group("/admin")
+	admin.Use(middleware.RequireAuth(s.idp))
+	admin.Use(middleware.RequireRole("admin"))
+	{
+		admin.POST("/users/ban", s.h.admin.BanUser)
+		admin.POST("/users/role", s.h.admin.SetRole)
+		admin.GET("/users", s.h.admin.ListUsers)
+		admin.POST("/users", s.h.admin.CreateUser)
+		admin.POST("/tokens", s.h.auth.CreateToken)
+		admin.GET("/skills", s.h.admin.ListAllSkills)
+		admin.POST("/skills/:slug/review", s.h.admin.ReviewSkill)
+		admin.POST("/skills/:slug/visibility", s.h.admin.SetVisibility)
+		admin.GET("/audit-logs", s.h.audit.List)
+	}
+
+	// Agent auto-provisioning (rate-limited, requires SKILLHUB_AGENT_SECRET)
+	api.POST("/agent/provision", s.rateLimiter.RateLimit("write"), s.h.agent.Provision)
+
+	// Webhook endpoints
+	webhooks := api.Group("/webhooks")
+	{
+		webhooks.POST("/github", s.h.webhook.GitHubWebhook)
+		webhooks.POST("/gitlab", s.h.webhook.GitLabWebhook)
+		webhooks.POST("/gitea", s.h.webhook.GiteaWebhook)
+	}
+}
+
+// RegisterStatic 把 SkillHub 自带的前端 SPA 静态资源 + NoRoute 兜底挂到 engine。
+//
+// 这一段被单独抽出来的原因：
+//   - StaticFS 与 NoRoute 都是 *gin.Engine 的方法，gin.IRouter（即 RouterGroup）没有 NoRoute；
+//   - 嵌入方往往已经有自己的前端，不需要 SkillHub 的 SPA。把它独立成一个方法，
+//     调用方按需选择是否复用。
+//
+// 注意：NoRoute 只能在 *gin.Engine 上注册一次；多次调用会以最后一次为准（gin 行为）。
+func (s *Server) RegisterStatic(engine *gin.Engine) {
+	// Serve embedded frontend static assets
+	staticFS, _ := fs.Sub(web.StaticFS, "static/assets")
+	engine.StaticFS("/assets", http.FS(staticFS))
+
+	// SPA fallback: serve index.html for all non-API routes
+	indexHTML, _ := web.StaticFS.ReadFile("static/index.html")
+	engine.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.JSON(404, gin.H{"error": "not found"})
+			return
+		}
+		c.Data(200, "text/html; charset=utf-8", indexHTML)
+	})
+}

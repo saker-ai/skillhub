@@ -7,14 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"mime/multipart"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/gitstore"
 	"github.com/cinience/skillhub/pkg/metrics"
 	"github.com/cinience/skillhub/pkg/model"
@@ -23,6 +22,7 @@ import (
 	"github.com/cinience/skillhub/pkg/security"
 	"github.com/cinience/skillhub/pkg/semver"
 	"github.com/cinience/skillhub/pkg/store"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -41,6 +41,41 @@ type SkillService struct {
 	auditSvc     *AuditService
 	nsSvc        *NamespaceService
 	sigVerifier  security.SignatureVerifier
+	// metrics 由嵌入方通过 SetMetrics 注入；nil 时走 metrics.Default 单例。
+	// 阶段 2 改造：避免直接读包级全局变量，便于宿主进程隔离指标命名空间。
+	metrics *metrics.Metrics
+	// logger 由 SetLogger 注入；nil 时回退到 slog.Default()。
+	// 阶段 4 改造：与 metrics 同样走 setter 注入，让宿主进程的结构化日志管线
+	// 能拿到 service 层的事件，而不是走包级 slog.Default() 绕过去。
+	logger *slog.Logger
+}
+
+// SetMetrics 注入 *metrics.Metrics 实例。nil 等价于走 metrics.Default。
+// 必须在 Server 装配阶段调用（即 New 之后、对外开放之前），运行期切换不被支持。
+func (s *SkillService) SetMetrics(m *metrics.Metrics) {
+	s.metrics = m
+}
+
+// metricsOrDefault 返回当前注入的 metrics 实例；未注入时回退到 Default 单例。
+func (s *SkillService) metricsOrDefault() *metrics.Metrics {
+	if s.metrics != nil {
+		return s.metrics
+	}
+	return metrics.Default
+}
+
+// SetLogger 注入 *slog.Logger 实例。nil 等价于走 slog.Default()。
+// 与 SetMetrics 同样必须在 Server 装配阶段调用。
+func (s *SkillService) SetLogger(lg *slog.Logger) {
+	s.logger = lg
+}
+
+// loggerOrDefault 返回当前注入的 logger；未注入时回退到 slog.Default()。
+func (s *SkillService) loggerOrDefault() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 // SetNamespaceService injects the namespace service for membership/publish checks.
@@ -95,6 +130,30 @@ type PublishRequest struct {
 	Files         map[string][]byte // path → content
 	Dependencies  []model.SkillDependency // declared upstream skill deps
 	SignatureBundle []byte                // optional sigstore .sigstore JSON
+
+	// TokenNamespace 由 handler 透传当前请求 token 绑定的 namespace ID(*middleware.GetTokenNamespace*)。
+	// 非 nil ⇒ 团队 token,要求目标 skill 隶属该 namespace；不一致直接 403。
+	// nil ⇒ 个人 token / cookie 会话,沿用旧的 owner-ID 鉴权路径。
+	TokenNamespace *uuid.UUID
+}
+
+// authorizeSkillWrite 判定 caller 是否可对 skill 做写操作。
+//
+// 优先看 tokenNS：团队 token 在签发时已校验过 owner/admin 角色,所以这里跳过
+// skill.OwnerID 检查,只要求目标 skill 隶属同一个 namespace。
+//
+// tokenNS == nil(个人 token / cookie 会话)走旧路径：必须本人 owner 或系统 admin。
+func (s *SkillService) authorizeSkillWrite(skillNS *uuid.UUID, ownerID uuid.UUID, user *model.User, tokenNS *uuid.UUID) error {
+	if tokenNS != nil {
+		if skillNS == nil || *skillNS != *tokenNS {
+			return fmt.Errorf("%w: team token cannot operate on skills outside its namespace", ErrForbidden)
+		}
+		return nil
+	}
+	if ownerID != user.ID && !user.IsAdmin() {
+		return fmt.Errorf("%w: only the skill owner or a system admin can perform this action", ErrForbidden)
+	}
+	return nil
 }
 
 func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req PublishRequest) (*model.SkillWithOwner, *model.SkillVersion, error) {
@@ -173,6 +232,15 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		nsID = &ns.ID
 	}
 
+	// 团队 token 必须指向自己 namespace,不允许借此发个人 skill 或别 namespace 的 skill。
+	// 这里只校验 *新 skill* 的 namespace 选择是否合法；下面 existing-skill 分支
+	// 还会再用 authorizeSkillWrite 把已存在的 skill 也校验一次。
+	if req.TokenNamespace != nil {
+		if nsID == nil || *nsID != *req.TokenNamespace {
+			return nil, nil, fmt.Errorf("%w: team token can only publish to its bound namespace", ErrForbidden)
+		}
+	}
+
 	// Validate visibility (only public/private allowed; defaults to private on create)
 	visibility := "private"
 	if req.Visibility != "" {
@@ -241,9 +309,9 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 			OwnerHandle: user.Handle,
 		}
 	} else {
-		// Verify ownership
-		if skill.OwnerID != user.ID && !user.IsAdmin() {
-			return nil, nil, fmt.Errorf("you don't own this skill")
+		// Verify ownership / namespace token scoping.
+		if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, req.TokenNamespace); err != nil {
+			return nil, nil, err
 		}
 	}
 
@@ -439,15 +507,18 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 			CreatedAt:        skill.CreatedAt.Unix(),
 		}
 		if err := s.searchClient.IndexSkill(ctx, doc); err != nil {
-			log.Printf("warning: failed to index skill to search: %v", err)
+			s.loggerOrDefault().Warn("failed to index skill to search", "err", err)
 		}
 	}
 
 	// Mirror push (async)
 	if s.mirrorSvc != nil && s.mirrorSvc.Enabled() {
+		// Snapshot the logger outside the goroutine so the closure doesn't
+		// race with a (hypothetical) future SetLogger call mid-flight.
+		lg := s.loggerOrDefault()
 		go func() {
 			if err := s.mirrorSvc.PushMirror(context.Background(), user.Handle, req.Slug); err != nil {
-				log.Printf("warning: mirror push failed for %s/%s: %v", user.Handle, req.Slug, err)
+				lg.Warn("mirror push failed", "owner", user.Handle, "slug", req.Slug, "err", err)
 			}
 		}()
 	}
@@ -457,7 +528,7 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		s.auditSvc.Log(ctx, &user.ID, "publish", "skill_version", &ver.ID, "", "")
 	}
 
-	metrics.SkillPublished.WithLabelValues(skill.Visibility).Inc()
+	s.metricsOrDefault().SkillPublished.WithLabelValues(skill.Visibility).Inc()
 
 	return skill, ver, nil
 }
@@ -525,7 +596,7 @@ func (s *SkillService) Download(ctx context.Context, slug, version string, ident
 		}
 	}
 
-	metrics.SkillDownloads.Inc()
+	s.metricsOrDefault().SkillDownloads.Inc()
 
 	return &DownloadResult{
 		Archive:     archive,
@@ -732,13 +803,17 @@ func (s *SkillService) GetVersion(ctx context.Context, slug, version string, vie
 }
 
 // SoftDelete soft-deletes a skill.
-func (s *SkillService) SoftDelete(ctx context.Context, user *model.User, slug string) error {
+//
+// tokenNS:当前请求 token 绑定的 namespace ID(由 handler 透传)。
+//   - 非 nil ⇒ 团队 token：要求 skill 隶属同一 namespace,跳过 owner 自检；
+//   - nil    ⇒ 个人 token / cookie：必须本人 owner 或系统 admin。
+func (s *SkillService) SoftDelete(ctx context.Context, user *model.User, slug string, tokenNS *uuid.UUID) error {
 	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
 	if err != nil || skill == nil {
 		return fmt.Errorf("skill not found")
 	}
-	if skill.OwnerID != user.ID && !user.IsAdmin() {
-		return fmt.Errorf("forbidden")
+	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
+		return err
 	}
 	if err := s.skillRepo.SoftDelete(ctx, skill.ID); err != nil {
 		return err
@@ -749,14 +824,14 @@ func (s *SkillService) SoftDelete(ctx context.Context, user *model.User, slug st
 	return nil
 }
 
-// Undelete restores a soft-deleted skill.
-func (s *SkillService) Undelete(ctx context.Context, user *model.User, slug string) error {
+// Undelete restores a soft-deleted skill. tokenNS 语义同 SoftDelete。
+func (s *SkillService) Undelete(ctx context.Context, user *model.User, slug string, tokenNS *uuid.UUID) error {
 	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
 	if err != nil || skill == nil {
 		return fmt.Errorf("skill not found")
 	}
-	if skill.OwnerID != user.ID && !user.IsAdmin() {
-		return fmt.Errorf("forbidden")
+	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
+		return err
 	}
 	if err := s.skillRepo.Undelete(ctx, skill.ID); err != nil {
 		return err

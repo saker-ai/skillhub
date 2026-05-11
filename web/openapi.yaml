@@ -1,0 +1,1396 @@
+openapi: 3.1.0
+info:
+  title: SkillHub API
+  description: |
+    SkillHub registry HTTP API — discovery, publishing, authentication, namespaces,
+    stars/comments/ratings, notifications, and admin operations.
+
+    All JSON endpoints live under `/api/v1`. Bearer tokens (`Authorization: Bearer <token>`)
+    are obtained via the device flow (`/api/v1/auth/device/*`) or via a logged-in web
+    session cookie (`session_token`).
+
+    See `/skills.md` for a runnable curl-based walkthrough designed for AI agents.
+  version: "1.0.0"
+  license:
+    name: MIT
+servers:
+  - url: /
+    description: Same-origin
+tags:
+  - name: Discovery
+    description: Public, unauthenticated probes — health, well-known, install guide.
+  - name: Skills
+    description: Browse, inspect, publish, manage skill versions.
+  - name: Search
+    description: Full-text search over public skills.
+  - name: Download
+    description: Skill bundle download and fingerprint resolution.
+  - name: Auth
+    description: Device flow, login/logout, identity inspection.
+  - name: Tokens
+    description: Personal API tokens.
+  - name: Namespaces
+    description: Team namespaces, members, invitations, team tokens.
+  - name: Stars
+  - name: Comments
+  - name: Ratings
+  - name: Notifications
+  - name: Admin
+  - name: Webhooks
+paths:
+
+  # ──────────────────────────────────────────────────────────────────
+  # Discovery
+  # ──────────────────────────────────────────────────────────────────
+  /healthz:
+    get:
+      tags: [Discovery]
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Server is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /readyz:
+    get:
+      tags: [Discovery]
+      summary: Readiness probe (DB ping)
+      responses:
+        "200":
+          description: Ready to serve traffic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Database not reachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /metrics:
+    get:
+      tags: [Discovery]
+      summary: Prometheus scrape endpoint
+      description: Plain-text Prometheus exposition format. Place behind network ACLs in production.
+      responses:
+        "200":
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+  /.well-known/clawhub.json:
+    get:
+      tags: [Discovery]
+      summary: Well-known registry descriptor
+      description: Machine-readable map of public endpoints. Re-fetch when in doubt about which paths exist.
+      responses:
+        "200":
+          description: Endpoint map
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClawHubDescriptor"
+  /skills.md:
+    get:
+      tags: [Discovery]
+      summary: Agent-readable install/operations guide
+      description: |
+        Markdown document with runnable `curl` examples for every public flow.
+        Intended for `Read https://<host>/skills.md and follow the instructions`
+        usage by AI agents. Cached for 5 minutes.
+      responses:
+        "200":
+          description: Markdown guide
+          content:
+            text/markdown:
+              schema:
+                type: string
+
+  # ──────────────────────────────────────────────────────────────────
+  # Search & browse
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/search:
+    get:
+      tags: [Search]
+      summary: Full-text search over public skills
+      parameters:
+        - { name: q,      in: query, required: true,  schema: { type: string }, description: "Query string" }
+        - { name: limit,  in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: sort,   in: query, required: false, schema: { type: string }, description: "Bleve sort field, e.g. -downloads" }
+      responses:
+        "200":
+          description: Bleve search result
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/v1/skills:
+    get:
+      tags: [Skills]
+      summary: List skills (paginated)
+      parameters:
+        - { name: cursor,   in: query, schema: { type: string },  description: "Opaque cursor from previous nextCursor" }
+        - { name: sort,     in: query, schema: { type: string, enum: [created, downloads, stars, updated], default: created } }
+        - { name: limit,    in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: category, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Paginated skill list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:       { type: array, items: { $ref: "#/components/schemas/Skill" } }
+                  nextCursor: { type: string, nullable: true }
+    post:
+      tags: [Skills]
+      summary: Publish a new skill version (multipart)
+      description: |
+        At least one file is required and `SKILL.md` must be present in the upload.
+        With a team token, the `namespace` field MUST equal the token's bound namespace.
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [slug, version, files]
+              properties:
+                slug:         { type: string, description: "Unique skill slug" }
+                version:      { type: string, description: "Semver, e.g. 0.1.0" }
+                displayName:  { type: string }
+                summary:      { type: string }
+                category:     { type: string }
+                kind:         { type: string }
+                visibility:   { type: string, enum: [public, private] }
+                namespace:    { type: string, description: "Namespace slug (required when using a team token)" }
+                changelog:    { type: string }
+                tags:         { type: string, description: "Comma- or semicolon-separated" }
+                dependencies: { type: string, description: "JSON array of {slug, versionRange}" }
+                signature:    { type: string, description: "Cosign bundle, max 64 KB" }
+                files:
+                  type: array
+                  items: { type: string, format: binary }
+      responses:
+        "200":
+          description: Skill + new version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skill:   { $ref: "#/components/schemas/Skill" }
+                  version: { $ref: "#/components/schemas/SkillVersion" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/skills/{slug}:
+    parameters:
+      - { name: slug, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Skills]
+      summary: Get a skill by slug
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Skill" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Skills]
+      summary: Soft-delete a skill (owner)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/skills/{slug}/undelete:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Skills]
+      summary: Restore a soft-deleted skill (owner)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/skills/{slug}/request-public:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Skills]
+      summary: Request that a private skill be reviewed for public visibility
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/skills/{slug}/versions:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Skills]
+      summary: List a skill's versions
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions: { type: array, items: { $ref: "#/components/schemas/SkillVersion" } }
+
+  /api/v1/skills/{slug}/versions/{version}:
+    parameters:
+      - { name: slug,    in: path, required: true, schema: { type: string } }
+      - { name: version, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Skills]
+      summary: Inspect one version
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/SkillVersion" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/skills/{slug}/versions/{version}/yank:
+    parameters:
+      - { name: slug,    in: path, required: true, schema: { type: string } }
+      - { name: version, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Skills]
+      summary: Yank a version (mark unsafe, hide from "latest")
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [Skills]
+      summary: Un-yank a version
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/skills/{slug}/versions/{version}/deprecate:
+    parameters:
+      - { name: slug,    in: path, required: true, schema: { type: string } }
+      - { name: version, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Skills]
+      summary: Deprecate a version (still installable, with warning)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [Skills]
+      summary: Un-deprecate a version
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/skills/{slug}/file:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Skills]
+      summary: Read one file from a version
+      parameters:
+        - { name: version, in: query, schema: { type: string, default: "latest" } }
+        - { name: path,    in: query, schema: { type: string, default: "SKILL.md" } }
+      responses:
+        "200":
+          description: File content (raw)
+          content:
+            text/plain:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ──────────────────────────────────────────────────────────────────
+  # Download / resolve
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/download:
+    get:
+      tags: [Download]
+      summary: Download a skill version as ZIP
+      description: Honors `If-None-Match` for ETag-based revalidation.
+      parameters:
+        - { name: slug,    in: query, required: true,  schema: { type: string } }
+        - { name: version, in: query, required: false, schema: { type: string, default: latest } }
+        - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Skill bundle
+          headers:
+            ETag:                { schema: { type: string } }
+            X-Skill-Version:     { schema: { type: string } }
+            X-Skill-Fingerprint: { schema: { type: string } }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "304": { description: Not Modified (ETag matched) }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/resolve:
+    get:
+      tags: [Download]
+      summary: Reverse-lookup a version by SHA-256 fingerprint
+      parameters:
+        - { name: fingerprint, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Skill + version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skill:   { $ref: "#/components/schemas/Skill" }
+                  version: { $ref: "#/components/schemas/SkillVersion" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ──────────────────────────────────────────────────────────────────
+  # Auth
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/auth/device/code:
+    post:
+      tags: [Auth]
+      summary: Request a device code (start device flow)
+      responses:
+        "200":
+          description: Device code grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceCodeGrant" }
+  /api/v1/auth/device/verify:
+    post:
+      tags: [Auth]
+      summary: Submit a userCode to bind an authenticated user
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userCode: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/auth/device/token:
+    post:
+      tags: [Auth]
+      summary: Exchange a device code for a bearer token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceCode]
+              properties:
+                deviceCode: { type: string }
+      responses:
+        "200":
+          description: Token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+        "202":
+          description: Pending — user has not yet approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [pending] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /login:
+    post:
+      tags: [Auth]
+      summary: Submit web login (cookie session)
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /logout:
+    post:
+      tags: [Auth]
+      summary: Clear the session cookie
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+  /auth/{provider}:
+    parameters: [{ name: provider, in: path, required: true, schema: { type: string, enum: [github, gitlab, google] } }]
+    get:
+      tags: [Auth]
+      summary: OAuth login redirect
+      responses:
+        "302": { description: Redirect to provider }
+  /auth/{provider}/callback:
+    parameters: [{ name: provider, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Auth]
+      summary: OAuth callback handler
+      responses:
+        "302": { description: Redirect to UI after exchange }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/v1/whoami:
+    get:
+      tags: [Auth]
+      summary: Inspect the currently authenticated principal
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ──────────────────────────────────────────────────────────────────
+  # Personal tokens
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/tokens:
+    get:
+      tags: [Tokens]
+      summary: List the current user's personal tokens
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200":
+          description: Tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/APIToken" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Tokens]
+      summary: Issue a new personal token
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenCreateRequest" }
+      responses:
+        "201":
+          description: Token created (raw value shown once)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenCreateResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/tokens/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+    delete:
+      tags: [Tokens]
+      summary: Revoke a personal token
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ──────────────────────────────────────────────────────────────────
+  # Namespaces
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/namespaces:
+    get:
+      tags: [Namespaces]
+      summary: List namespaces the current user belongs to
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200":
+          description: Namespaces
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Namespace" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Namespaces]
+      summary: Create a namespace
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NamespaceCreateRequest" }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/Namespace" } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/namespaces/{slug}:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Namespaces]
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      summary: Get a namespace
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Namespace" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Namespaces]
+      summary: Update displayName / description
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string }
+                description: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Namespace" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [Namespaces]
+      summary: Delete a namespace (owner only). Cascades team-token revocation.
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/namespaces/{slug}/members:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Namespaces]
+      summary: List members
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200":
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/NamespaceMember" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Namespaces]
+      summary: Add a member directly (owner/admin)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle]
+              properties:
+                handle: { type: string }
+                role:   { type: string, enum: [owner, admin, member], default: member }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/namespaces/{slug}/members/{handle}:
+    parameters:
+      - { name: slug,   in: path, required: true, schema: { type: string } }
+      - { name: handle, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [Namespaces]
+      summary: Remove a member (owner/admin). Cascades the user's team tokens in this namespace.
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/namespaces/{slug}/leave:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Namespaces]
+      summary: Leave a namespace
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/namespaces/{slug}/transfer:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Namespaces]
+      summary: Transfer ownership to another member
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newOwner]
+              properties:
+                newOwner: { type: string, description: "handle of new owner (must already be member)" }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/namespaces/{slug}/invitations:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Namespaces]
+      summary: List invitations for this namespace
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [pending, accepted, declined, revoked] } }
+      responses:
+        "200":
+          description: Invitations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
+    post:
+      tags: [Namespaces]
+      summary: Invite a user
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle]
+              properties:
+                handle:  { type: string }
+                role:    { type: string, enum: [admin, member], default: member }
+                message: { type: string }
+      responses:
+        "201":
+          description: Invitation created
+          content: { application/json: { schema: { $ref: "#/components/schemas/Invitation" } } }
+  /api/v1/namespaces/{slug}/invitations/{id}:
+    parameters:
+      - { name: slug, in: path, required: true, schema: { type: string } }
+      - { name: id,   in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      tags: [Namespaces]
+      summary: Revoke an invitation
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+  /api/v1/invitations:
+    get:
+      tags: [Namespaces]
+      summary: List invitations addressed to the current user
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200":
+          description: My invitations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
+  /api/v1/invitations/{id}/accept:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+    post:
+      tags: [Namespaces]
+      summary: Accept an invitation
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+  /api/v1/invitations/{id}/decline:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+    post:
+      tags: [Namespaces]
+      summary: Decline an invitation
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+
+  # ──────────────────────────────────────────────────────────────────
+  # Team tokens (namespace-scoped)
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/namespaces/{slug}/tokens:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Namespaces]
+      summary: List active team tokens (owner/admin only)
+      description: |
+        Cursor-paginated. Pass the previous response's `nextCursor` as `cursor`
+        to fetch the next page; absence of `nextCursor` signals last page.
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 }, description: "Page size (out-of-range falls back to default)" }
+        - { name: cursor, in: query, schema: { type: string }, description: "Opaque cursor from previous nextCursor" }
+      responses:
+        "200":
+          description: Active team tokens (one page)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/APIToken" } }
+                  nextCursor: { type: string, nullable: true, description: "Omitted on last page" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Namespaces]
+      summary: Mint a team token bound to this namespace (owner/admin only)
+      description: |
+        Capped at 50 active tokens per namespace. Exceeding the cap returns 409
+        with `limit` and `count` so clients can render an actionable message
+        ("revoke an unused token before creating a new one").
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenCreateRequest" }
+      responses:
+        "201":
+          description: Team token created (raw value shown once)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenCreateResponse" }
+        "400":
+          description: Validation error (invalid scope, missing or out-of-range expiresIn)
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Per-namespace active-token quota exhausted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  limit: { type: integer, example: 50 }
+                  count: { type: integer, example: 50 }
+  /api/v1/namespaces/{slug}/tokens/{id}:
+    parameters:
+      - { name: slug, in: path, required: true, schema: { type: string } }
+      - { name: id,   in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      tags: [Namespaces]
+      summary: Revoke a team token
+      description: Owner / admin can revoke any team token; members can revoke only those they created.
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ──────────────────────────────────────────────────────────────────
+  # Stars / Comments / Ratings / Notifications
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/stars/{slug}:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Stars]
+      summary: Star a skill
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses: { "200": { $ref: "#/components/responses/MessageOK" } }
+    delete:
+      tags: [Stars]
+      summary: Un-star a skill
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses: { "200": { $ref: "#/components/responses/MessageOK" } }
+
+  /api/v1/skills/{slug}/comments:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Comments]
+      summary: List comments on a skill
+      parameters:
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:       { type: array, items: { $ref: "#/components/schemas/Comment" } }
+                  nextCursor: { type: string, nullable: true }
+    post:
+      tags: [Comments]
+      summary: Post a comment
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+      responses:
+        "200": { description: Created comment, content: { application/json: { schema: { $ref: "#/components/schemas/Comment" } } } }
+
+  /api/v1/comments/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+    delete:
+      tags: [Comments]
+      summary: Delete a comment (author or moderator)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/skills/{slug}/ratings:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Ratings]
+      summary: List ratings
+      parameters:
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Ratings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:       { type: array, items: { $ref: "#/components/schemas/Rating" } }
+                  nextCursor: { type: string, nullable: true }
+    post:
+      tags: [Ratings]
+      summary: Submit (upsert) a rating
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [score]
+              properties:
+                score:   { type: integer, minimum: 1, maximum: 5 }
+                comment: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+    delete:
+      tags: [Ratings]
+      summary: Delete the current user's rating
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: List the current user's notifications
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Notification" } }
+  /api/v1/notifications/unread:
+    get:
+      tags: [Notifications]
+      summary: Unread count + items
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200":
+          description: Unread
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  data:  { type: array, items: { $ref: "#/components/schemas/Notification" } }
+  /api/v1/notifications/{id}/read:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+    post:
+      tags: [Notifications]
+      summary: Mark a notification as read
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses: { "200": { $ref: "#/components/responses/MessageOK" } }
+  /api/v1/notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses: { "200": { $ref: "#/components/responses/MessageOK" } }
+
+  # ──────────────────────────────────────────────────────────────────
+  # Admin
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/admin/users:
+    get:
+      tags: [Admin]
+      summary: List users (admin)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:       { type: array, items: { $ref: "#/components/schemas/User" } }
+                  nextCursor: { type: string, nullable: true }
+    post:
+      tags: [Admin]
+      summary: Create a user (admin)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle]
+              properties:
+                handle:      { type: string }
+                displayName: { type: string }
+                email:       { type: string, format: email }
+                role:        { type: string, enum: [user, moderator, admin], default: user }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/User" } } }
+
+  /api/v1/admin/users/ban:
+    post:
+      tags: [Admin]
+      summary: Ban a user
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: { type: string, format: uuid }
+                reason: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+
+  /api/v1/admin/users/role:
+    post:
+      tags: [Admin]
+      summary: Change a user's role
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, role]
+              properties:
+                userId: { type: string, format: uuid }
+                role:   { type: string, enum: [user, moderator, admin] }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+
+  /api/v1/admin/tokens:
+    post:
+      tags: [Admin]
+      summary: Mint a token on behalf of any user
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: { type: string, format: uuid }
+                label:  { type: string }
+                scope:  { type: string, enum: [full, read, publish], default: full }
+      responses:
+        "200":
+          description: Token
+          content: { application/json: { schema: { $ref: "#/components/schemas/TokenCreateResponse" } } }
+
+  /api/v1/admin/skills:
+    get:
+      tags: [Admin]
+      summary: List all skills (any visibility)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - { name: visibility, in: query, schema: { type: string, enum: [public, private, pending] } }
+        - { name: cursor,     in: query, schema: { type: string } }
+        - { name: limit,      in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: Skills
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:       { type: array, items: { $ref: "#/components/schemas/Skill" } }
+                  nextCursor: { type: string, nullable: true }
+
+  /api/v1/admin/skills/{slug}/review:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Admin]
+      summary: Approve or reject a public-visibility request
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [approve, reject] }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+
+  /api/v1/admin/skills/{slug}/visibility:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Admin]
+      summary: Force-set a skill's visibility
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visibility]
+              properties:
+                visibility: { type: string, enum: [public, private] }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: List audit log entries
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        "200":
+          description: Audit log
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  # ──────────────────────────────────────────────────────────────────
+  # Agent provisioning + webhooks
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/agent/provision:
+    post:
+      tags: [Auth]
+      summary: Auto-provision a token for a managed agent
+      description: Requires `SKILLHUB_AGENT_SECRET` to be configured server-side.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle, secret]
+              properties:
+                handle: { type: string }
+                secret: { type: string }
+      responses:
+        "200":
+          description: Token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/webhooks/github:
+    post:
+      tags: [Webhooks]
+      summary: GitHub push webhook (mirror import)
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /api/v1/webhooks/gitlab:
+    post:
+      tags: [Webhooks]
+      summary: GitLab push webhook
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+  /api/v1/webhooks/gitea:
+    post:
+      tags: [Webhooks]
+      summary: Gitea push webhook
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: |
+        Personal or team token from the device flow / `/api/v1/tokens`. Format is
+        opaque; treat it as a secret string. Pass as `Authorization: Bearer <token>`.
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: session_token
+      description: Set by `POST /login` and the OAuth callback. Browser-only.
+
+  responses:
+    BadRequest:
+      description: Validation error.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Unauthorized:
+      description: Missing or invalid token.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Forbidden:
+      description: Authenticated but not allowed.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    NotFound:
+      description: Resource not found.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    MessageOK:
+      description: Success.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+    HealthStatus:
+      type: object
+      properties:
+        status: { type: string }
+    ClawHubDescriptor:
+      type: object
+      properties:
+        registryUrl: { type: string, format: uri }
+        apiVersion:  { type: string }
+        endpoints:
+          type: object
+          additionalProperties: { type: string }
+
+    User:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        handle:      { type: string }
+        displayName: { type: string, nullable: true }
+        email:       { type: string, nullable: true }
+        role:        { type: string, enum: [user, moderator, admin] }
+        avatarUrl:   { type: string, nullable: true }
+        createdAt:   { type: string, format: date-time }
+
+    Skill:
+      type: object
+      properties:
+        id:            { type: string, format: uuid }
+        slug:          { type: string }
+        displayName:   { type: string }
+        summary:       { type: string }
+        description:   { type: string }
+        category:      { type: string, nullable: true }
+        kind:          { type: string, nullable: true }
+        tags:          { type: array, items: { type: string } }
+        visibility:    { type: string, enum: [public, private] }
+        latestVersion: { type: string }
+        downloads:     { type: integer }
+        stars:         { type: integer }
+        ownerId:       { type: string, format: uuid }
+        namespaceId:   { type: string, format: uuid, nullable: true }
+        createdAt:     { type: string, format: date-time }
+        updatedAt:     { type: string, format: date-time }
+
+    SkillVersion:
+      type: object
+      properties:
+        id:              { type: string, format: uuid }
+        skillId:         { type: string, format: uuid }
+        version:         { type: string, description: "Semver" }
+        changelog:       { type: string }
+        fingerprint:     { type: string, description: "SHA-256 hex" }
+        signatureBundle: { type: string, nullable: true }
+        yankedAt:        { type: string, format: date-time, nullable: true }
+        yankReason:      { type: string, nullable: true }
+        deprecatedAt:    { type: string, format: date-time, nullable: true }
+        deprecateMessage: { type: string, nullable: true }
+        dependencies:
+          type: array
+          items:
+            type: object
+            properties:
+              slug:         { type: string }
+              versionRange: { type: string }
+        publishedAt:     { type: string, format: date-time }
+
+    APIToken:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        userId:      { type: string, format: uuid }
+        namespaceId: { type: string, format: uuid, nullable: true }
+        label:       { type: string }
+        prefix:      { type: string, description: "First 8 chars of the raw token" }
+        scope:       { type: string, enum: [full, read, publish] }
+        expiresAt:   { type: string, format: date-time, nullable: true }
+        lastUsedAt:  { type: string, format: date-time, nullable: true }
+        revokedAt:   { type: string, format: date-time, nullable: true }
+        createdAt:   { type: string, format: date-time }
+
+    TokenCreateRequest:
+      type: object
+      properties:
+        label:     { type: string }
+        scope:     { type: string, enum: [full, read, publish], default: full }
+        expiresIn: { type: string, description: "Go duration string, e.g. \"720h\"" }
+
+    TokenCreateResponse:
+      type: object
+      properties:
+        token:    { type: string, description: "Raw token; shown only once — store immediately." }
+        metadata: { $ref: "#/components/schemas/APIToken" }
+
+    Namespace:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        slug:        { type: string }
+        displayName: { type: string }
+        description: { type: string }
+        type:        { type: string, enum: [personal, team] }
+        ownerId:     { type: string, format: uuid }
+        createdAt:   { type: string, format: date-time }
+
+    NamespaceCreateRequest:
+      type: object
+      required: [slug]
+      properties:
+        slug:        { type: string }
+        displayName: { type: string }
+        description: { type: string }
+        type:        { type: string, enum: [personal, team], default: team }
+
+    NamespaceMember:
+      type: object
+      properties:
+        userId:    { type: string, format: uuid }
+        handle:    { type: string }
+        role:      { type: string, enum: [owner, admin, member] }
+        joinedAt:  { type: string, format: date-time }
+
+    Invitation:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        namespaceId: { type: string, format: uuid }
+        inviterId:   { type: string, format: uuid }
+        inviteeId:   { type: string, format: uuid }
+        role:        { type: string, enum: [admin, member] }
+        message:     { type: string }
+        status:      { type: string, enum: [pending, accepted, declined, revoked] }
+        createdAt:   { type: string, format: date-time }
+        respondedAt: { type: string, format: date-time, nullable: true }
+
+    Comment:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        skillId:   { type: string, format: uuid }
+        authorId:  { type: string, format: uuid }
+        body:      { type: string }
+        createdAt: { type: string, format: date-time }
+
+    Rating:
+      type: object
+      properties:
+        userId:    { type: string, format: uuid }
+        skillId:   { type: string, format: uuid }
+        score:     { type: integer, minimum: 1, maximum: 5 }
+        comment:   { type: string }
+        createdAt: { type: string, format: date-time }
+
+    Notification:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        userId:    { type: string, format: uuid }
+        kind:      { type: string }
+        payload:   { type: object, additionalProperties: true }
+        readAt:    { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    DeviceCodeGrant:
+      type: object
+      properties:
+        deviceCode:      { type: string }
+        userCode:        { type: string }
+        verificationUri: { type: string, format: uri }
+        expiresIn:       { type: integer, description: "Seconds" }
+        interval:        { type: integer, description: "Polling interval in seconds" }

@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,11 +23,25 @@ type MirrorService struct {
 	gitStore *GitStore
 	cfg      config.MirrorConfig
 	token    string
+	logger   *slog.Logger
 }
 
 func NewMirrorService(gs *GitStore, cfg config.MirrorConfig) *MirrorService {
 	token := os.Getenv(cfg.TokenEnv)
 	return &MirrorService{gitStore: gs, cfg: cfg, token: token}
+}
+
+// SetLogger 注入 *slog.Logger。nil 等价于走 slog.Default()。
+// PushAll 在装配后才会被调用,因此 setter 在 server.go 装配阶段调用即可。
+func (m *MirrorService) SetLogger(lg *slog.Logger) {
+	m.logger = lg
+}
+
+func (m *MirrorService) loggerOrDefault() *slog.Logger {
+	if m.logger != nil {
+		return m.logger
+	}
+	return slog.Default()
 }
 
 func (m *MirrorService) Enabled() bool {
@@ -89,7 +103,7 @@ func (m *MirrorService) PushAll(ctx context.Context) error {
 			}
 			slug := strings.TrimSuffix(repoDir.Name(), ".git")
 			if err := m.PushMirror(ctx, ownerDir.Name(), slug); err != nil {
-				log.Printf("mirror push failed for %s/%s: %v", ownerDir.Name(), slug, err)
+				m.loggerOrDefault().Warn("mirror push failed", "owner", ownerDir.Name(), "slug", slug, "err", err)
 			}
 		}
 	}

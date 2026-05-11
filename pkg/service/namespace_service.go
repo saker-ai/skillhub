@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/cinience/skillhub/pkg/metrics"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
 )
@@ -17,9 +18,12 @@ const InvitationTTL = 14 * 24 * time.Hour
 var nsSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
 
 type NamespaceService struct {
-	nsRepo   *repository.NamespaceRepo
-	userRepo *repository.UserRepo
-	invRepo  *repository.NamespaceInvitationRepo
+	nsRepo    *repository.NamespaceRepo
+	userRepo  *repository.UserRepo
+	invRepo   *repository.NamespaceInvitationRepo
+	tokenRepo *repository.TokenRepo
+	auditSvc  *AuditService
+	metrics   *metrics.Metrics
 }
 
 func NewNamespaceService(nsRepo *repository.NamespaceRepo, userRepo *repository.UserRepo) *NamespaceService {
@@ -30,6 +34,41 @@ func NewNamespaceService(nsRepo *repository.NamespaceRepo, userRepo *repository.
 // fail gracefully if not configured.
 func (s *NamespaceService) SetInvitationRepo(invRepo *repository.NamespaceInvitationRepo) {
 	s.invRepo = invRepo
+}
+
+// SetTokenRepo wires the token repo. Optional but strongly recommended:
+// when nil, RemoveMember / Leave / Delete cannot cascade-revoke namespace-bound
+// team tokens, leaving them as orphans. The publish-time auth check
+// (authorizeSkillWrite) is the second line of defense — it rejects tokens whose
+// namespace_id no longer matches the actor's membership — but the orphan
+// records themselves linger in the DB until manually cleaned up.
+//
+// 之所以做成 setter 而非构造函数参数，是为了不破坏既有的 NewNamespaceService
+// 签名（与 SetInvitationRepo 一致的风格）。
+func (s *NamespaceService) SetTokenRepo(tokenRepo *repository.TokenRepo) {
+	s.tokenRepo = tokenRepo
+}
+
+// SetAuditService wires the audit service so cascade-revoke paths
+// (member remove / leave / namespace delete) can record how many team tokens
+// were affected and why. nil is a no-op so embedders without an audit pipeline
+// keep the cascade semantics without a dependency.
+func (s *NamespaceService) SetAuditService(a *AuditService) {
+	s.auditSvc = a
+}
+
+// SetMetrics wires the Prometheus metrics instance so cascade-revoke paths
+// can increment skillhub_team_token_revoked_total{cause=cascade_*}. nil falls
+// back to metrics.Default — same convention as SkillService.SetMetrics.
+func (s *NamespaceService) SetMetrics(m *metrics.Metrics) {
+	s.metrics = m
+}
+
+func (s *NamespaceService) metricsOrDefault() *metrics.Metrics {
+	if s.metrics != nil {
+		return s.metrics
+	}
+	return metrics.Default
 }
 
 // Create creates a new namespace and adds the creator as owner.
@@ -131,7 +170,7 @@ func (s *NamespaceService) AddMember(ctx context.Context, actor *model.User, nsS
 		return err
 	}
 	if actorRole != "owner" && actorRole != "admin" && !actor.IsAdmin() {
-		return fmt.Errorf("forbidden: only owner or admin can manage members")
+		return fmt.Errorf("%w: only owner or admin can manage members", ErrForbidden)
 	}
 
 	if role == "" {
@@ -173,7 +212,7 @@ func (s *NamespaceService) RemoveMember(ctx context.Context, actor *model.User, 
 		return err
 	}
 	if actorRole != "owner" && actorRole != "admin" && !actor.IsAdmin() {
-		return fmt.Errorf("forbidden: only owner or admin can manage members")
+		return fmt.Errorf("%w: only owner or admin can manage members", ErrForbidden)
 	}
 
 	targetUser, err := s.userRepo.GetByHandle(ctx, handle)
@@ -187,7 +226,37 @@ func (s *NamespaceService) RemoveMember(ctx context.Context, actor *model.User, 
 		return fmt.Errorf("cannot remove the owner from the namespace")
 	}
 
-	return s.nsRepo.RemoveMember(ctx, ns.ID, targetUser.ID)
+	// Cascade-revoke target's namespace-bound team tokens BEFORE removing
+	// membership. Order matters: if revoke errors out, membership is unchanged
+	// and the caller can retry — the second revoke is a no-op (UPDATE filters
+	// revoked_at IS NULL). If we removed first then revoked, a transient revoke
+	// failure would leave orphan tokens whose owner has already lost access.
+	var revokedCount int64
+	if s.tokenRepo != nil {
+		n, err := s.tokenRepo.RevokeByNamespaceAndUser(ctx, ns.ID, targetUser.ID)
+		if err != nil {
+			return fmt.Errorf("cascade-revoke team tokens: %w", err)
+		}
+		revokedCount = n
+	}
+
+	if err := s.nsRepo.RemoveMember(ctx, ns.ID, targetUser.ID); err != nil {
+		return err
+	}
+
+	// Audit AFTER both side effects succeed — a Log row that says "we revoked N
+	// tokens" should never be present if the membership row didn't actually go
+	// away. Skipping when count==0 keeps the audit trail focused on real impact.
+	if revokedCount > 0 {
+		if s.auditSvc != nil {
+			nsID := ns.ID
+			s.auditSvc.Log(ctx, &actor.ID, "team_token_cascade_revoke", "namespace", &nsID,
+				fmt.Sprintf("cause=member_remove,target=%s,count=%d", targetUser.Handle, revokedCount), "")
+		}
+		s.metricsOrDefault().TeamTokenRevoked.
+			WithLabelValues("cascade_member_remove").Add(float64(revokedCount))
+	}
+	return nil
 }
 
 // ListMembers returns all members of a namespace.
@@ -225,6 +294,22 @@ func (s *NamespaceService) CanPublish(ctx context.Context, nsSlug string, userID
 	return role != "", nil
 }
 
+// CanManageTokens 判定 user 是否可在该 namespace 下创建/吊销/列出团队 token。
+// 规则：
+//   - 系统 admin 永远可以；
+//   - namespace 内角色为 owner / admin 的成员可以；
+//   - 普通 member 不可以——避免 invite-once-then-self-issue-token 升权。
+func (s *NamespaceService) CanManageTokens(ctx context.Context, nsID uuid.UUID, user *model.User) bool {
+	if user.IsAdmin() {
+		return true
+	}
+	role, err := s.nsRepo.GetMemberRole(ctx, nsID, user.ID)
+	if err != nil {
+		return false
+	}
+	return role == "owner" || role == "admin"
+}
+
 // TransferOwnership transfers ownership of a namespace to another existing
 // member. The current owner is demoted to "admin". Only the current owner
 // (or a system admin) may initiate the transfer.
@@ -239,7 +324,7 @@ func (s *NamespaceService) TransferOwnership(ctx context.Context, actor *model.U
 		return err
 	}
 	if actorRole != "owner" && !actor.IsAdmin() {
-		return fmt.Errorf("forbidden: only the owner can transfer ownership")
+		return fmt.Errorf("%w: only the owner can transfer ownership", ErrForbidden)
 	}
 
 	target, err := s.userRepo.GetByHandle(ctx, newOwnerHandle)
@@ -280,7 +365,30 @@ func (s *NamespaceService) Leave(ctx context.Context, user *model.User, nsSlug s
 		return fmt.Errorf("the owner cannot leave; transfer ownership or delete the namespace first")
 	}
 
-	return s.nsRepo.RemoveMember(ctx, ns.ID, user.ID)
+	// Cascade-revoke caller's tokens — see RemoveMember for the ordering rationale.
+	var revokedCount int64
+	if s.tokenRepo != nil {
+		n, err := s.tokenRepo.RevokeByNamespaceAndUser(ctx, ns.ID, user.ID)
+		if err != nil {
+			return fmt.Errorf("cascade-revoke team tokens: %w", err)
+		}
+		revokedCount = n
+	}
+
+	if err := s.nsRepo.RemoveMember(ctx, ns.ID, user.ID); err != nil {
+		return err
+	}
+
+	if revokedCount > 0 {
+		if s.auditSvc != nil {
+			nsID := ns.ID
+			s.auditSvc.Log(ctx, &user.ID, "team_token_cascade_revoke", "namespace", &nsID,
+				fmt.Sprintf("cause=member_leave,count=%d", revokedCount), "")
+		}
+		s.metricsOrDefault().TeamTokenRevoked.
+			WithLabelValues("cascade_member_leave").Add(float64(revokedCount))
+	}
+	return nil
 }
 
 // Delete deletes a namespace (owner only).
@@ -295,10 +403,39 @@ func (s *NamespaceService) Delete(ctx context.Context, user *model.User, nsSlug 
 		return err
 	}
 	if role != "owner" && !user.IsAdmin() {
-		return fmt.Errorf("forbidden: only the owner can delete a namespace")
+		return fmt.Errorf("%w: only the owner can delete a namespace", ErrForbidden)
 	}
 
-	return s.nsRepo.Delete(ctx, ns.ID)
+	// Cascade-revoke ALL tokens under this namespace before deleting it.
+	// Same ordering as RemoveMember: revoke first so a transient revoke failure
+	// does not leave dangling tokens whose namespace_id points to a row that
+	// no longer exists (would only matter if there is no FK ON DELETE clause —
+	// belt-and-suspenders).
+	var revokedCount int64
+	if s.tokenRepo != nil {
+		n, err := s.tokenRepo.RevokeByNamespace(ctx, ns.ID)
+		if err != nil {
+			return fmt.Errorf("cascade-revoke team tokens: %w", err)
+		}
+		revokedCount = n
+	}
+
+	if err := s.nsRepo.Delete(ctx, ns.ID); err != nil {
+		return err
+	}
+
+	// nsID captured before the namespace row went away — the AuditLog row
+	// itself outlives the namespace and reviewers can correlate by id.
+	if revokedCount > 0 {
+		if s.auditSvc != nil {
+			nsID := ns.ID
+			s.auditSvc.Log(ctx, &user.ID, "team_token_cascade_revoke", "namespace", &nsID,
+				fmt.Sprintf("cause=namespace_delete,count=%d", revokedCount), "")
+		}
+		s.metricsOrDefault().TeamTokenRevoked.
+			WithLabelValues("cascade_namespace_delete").Add(float64(revokedCount))
+	}
+	return nil
 }
 
 // Invite creates a pending invitation for an existing user to join a namespace.
@@ -319,7 +456,7 @@ func (s *NamespaceService) Invite(ctx context.Context, actor *model.User, nsSlug
 		return nil, err
 	}
 	if actorRole != "owner" && actorRole != "admin" && !actor.IsAdmin() {
-		return nil, fmt.Errorf("forbidden: only owner or admin can invite members")
+		return nil, fmt.Errorf("%w: only owner or admin can invite members", ErrForbidden)
 	}
 
 	if role == "" {
@@ -379,7 +516,7 @@ func (s *NamespaceService) ListInvitations(ctx context.Context, actor *model.Use
 		return nil, err
 	}
 	if actorRole != "owner" && actorRole != "admin" && !actor.IsAdmin() {
-		return nil, fmt.Errorf("forbidden: only owner or admin can view invitations")
+		return nil, fmt.Errorf("%w: only owner or admin can view invitations", ErrForbidden)
 	}
 
 	return s.invRepo.ListByNamespace(ctx, ns.ID, status)
@@ -401,7 +538,7 @@ func (s *NamespaceService) RevokeInvitation(ctx context.Context, actor *model.Us
 		return err
 	}
 	if actorRole != "owner" && actorRole != "admin" && !actor.IsAdmin() {
-		return fmt.Errorf("forbidden: only owner or admin can revoke invitations")
+		return fmt.Errorf("%w: only owner or admin can revoke invitations", ErrForbidden)
 	}
 
 	inv, err := s.invRepo.GetByID(ctx, invID)
@@ -437,7 +574,7 @@ func (s *NamespaceService) RespondToInvitation(ctx context.Context, user *model.
 		return fmt.Errorf("invitation not found")
 	}
 	if inv.InviteeID != user.ID {
-		return fmt.Errorf("forbidden: this invitation is not yours")
+		return fmt.Errorf("%w: this invitation is not yours", ErrForbidden)
 	}
 	if inv.Status != "pending" {
 		return fmt.Errorf("invitation is not pending (status: %s)", inv.Status)

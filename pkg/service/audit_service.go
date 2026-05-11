@@ -2,19 +2,33 @@ package service
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
+	"github.com/google/uuid"
 )
 
 type AuditService struct {
-	repo *repository.AuditRepo
+	repo   *repository.AuditRepo
+	logger *slog.Logger
 }
 
 func NewAuditService(repo *repository.AuditRepo) *AuditService {
 	return &AuditService{repo: repo}
+}
+
+// SetLogger 注入 *slog.Logger。nil 等价于走 slog.Default()。
+// 必须在 Server 装配阶段调用；运行期切换不被支持。
+func (s *AuditService) SetLogger(lg *slog.Logger) {
+	s.logger = lg
+}
+
+func (s *AuditService) loggerOrDefault() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 // Log records an audit event. Errors are logged but not returned to avoid
@@ -34,7 +48,7 @@ func (s *AuditService) Log(ctx context.Context, actorID *uuid.UUID, action, reso
 		entry.IPAddress = &ipAddress
 	}
 	if err := s.repo.Create(ctx, entry); err != nil {
-		log.Printf("audit: failed to log %s %s: %v", action, resourceType, err)
+		s.loggerOrDefault().Warn("audit: failed to log", "action", action, "resource_type", resourceType, "err", err)
 	}
 }
 

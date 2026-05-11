@@ -25,6 +25,8 @@ export default function Layout() {
           <nav className="nav">
             <Link to="/skills">{t('nav.skills')}</Link>
             <Link to="/publish">{t('nav.publish')}</Link>
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer">{t('nav.api')}</a>
+            {user && <Link to="/namespaces">{t('nav.namespaces')}</Link>}
             {user ? (
               <>
                 <span className="nav-user">{user.handle}</span>

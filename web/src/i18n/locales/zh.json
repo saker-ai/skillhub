@@ -4,7 +4,9 @@
     "search": "搜索",
     "publish": "发布",
     "login": "登录",
-    "logout": "退出"
+    "logout": "退出",
+    "namespaces": "命名空间",
+    "api": "API 文档"
   },
   "footer": {
     "tagline": "SkillHub — AI 智能体技能注册中心。"
@@ -16,7 +18,14 @@
     "browse": "浏览技能",
     "publish": "发布技能",
     "popular": "热门技能",
-    "view_all": "查看全部技能"
+    "view_all": "查看全部技能",
+    "install_heading": "安装",
+    "install_tab_agent": "AI 智能体",
+    "install_tab_human": "命令行",
+    "install_prompt": "Read {{url}} and follow the instructions to install skillhub skills for me.",
+    "install_hint": "把这段话粘贴给你的 AI 智能体即可——本注册中心 API 优先，无需安装任何 SDK。",
+    "install_human_command": "npx skills add <owner>/<skill>",
+    "install_hint_human": "在终端运行——把 <owner>/<skill> 替换为你想安装的技能。"
   },
   "skills": {
     "title": "技能",
@@ -128,6 +137,47 @@
     "copied": "已复制！",
     "loading": "加载中...",
     "toggle_theme": "切换主题",
-    "switch_lang": "切换语言"
+    "switch_lang": "切换语言",
+    "cancel": "取消",
+    "dismiss": "关闭"
+  },
+  "namespaces": {
+    "title": "命名空间",
+    "create_btn": "新建命名空间",
+    "create_title": "创建命名空间",
+    "slug": "标识名",
+    "slug_hint": "仅限小写字母、数字和连字符，如 acme-team",
+    "display_name": "显示名称",
+    "description": "描述",
+    "create_submit": "创建",
+    "empty": "你尚未加入任何命名空间。",
+    "back": "返回命名空间列表",
+    "members": "成员",
+    "not_found": "命名空间不存在"
+  },
+  "tokens": {
+    "title": "团队 Token",
+    "create_btn": "新建 Token",
+    "label": "标签",
+    "scope": "权限范围",
+    "scope_hint": "publish 允许上传技能；read 仅可读。",
+    "expires_in": "有效期",
+    "expires_hint": "必填，最长 365 天。",
+    "create_submit": "创建 Token",
+    "empty": "暂无团队 Token。",
+    "never": "永久",
+    "revoke": "吊销",
+    "confirm_revoke": "确认吊销该 Token？操作不可撤销。",
+    "show_once_warning": "请立即复制该 Token —— 关闭后将无法再次查看。",
+    "expires_1d": "1 天",
+    "expires_7d": "7 天",
+    "expires_30d": "30 天",
+    "expires_90d": "90 天",
+    "expires_365d": "365 天",
+    "col_label": "标签",
+    "col_prefix": "前缀",
+    "col_scope": "范围",
+    "col_created": "创建时间",
+    "col_expires": "到期时间"
   }
 }
