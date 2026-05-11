@@ -44,9 +44,9 @@ type GitStoreConfig struct {
 }
 
 type StoreConfig struct {
-	Backend string          `yaml:"backend"` // "git" (default) | "s3" | "oss"
-	S3      StoreS3Config   `yaml:"s3"`
-	OSS     StoreOSSConfig  `yaml:"oss"`
+	Backend string         `yaml:"backend"` // "git" (default) | "s3" | "oss"
+	S3      StoreS3Config  `yaml:"s3"`
+	OSS     StoreOSSConfig `yaml:"oss"`
 }
 
 type StoreS3Config struct {
@@ -95,7 +95,7 @@ type RateLimitConfig struct {
 }
 
 type AuthConfig struct {
-	TokenPrefix string              `yaml:"token_prefix"`
+	TokenPrefix string                         `yaml:"token_prefix"`
 	OAuth       map[string]OAuthProviderConfig `yaml:"oauth"`
 }
 

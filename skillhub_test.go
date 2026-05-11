@@ -322,17 +322,24 @@ func TestHub_ClawHubJSON_AdvertisesInstallGuide(t *testing.T) {
 	}
 }
 
-// TestHub_OpenAPI_ExposesSpec 验证 Swagger 三件套：
+// TestHub_OpenAPI_ExposesSpec 验证 Swagger 四件套：
 //   - /api/v1/openapi.yaml 返回原始 YAML 且包含我们手写的关键字段
 //   - /api/v1/openapi.json 是合法 JSON，能解析出 openapi/info/paths 三大块
-//   - /api/docs            返回 Swagger UI HTML，并且把 spec URL 指向 /api/v1/openapi.json
+//   - /api/docs            返回 Swagger UI HTML，引用 /swagger-init.js（外置脚本，
+//     满足严格 CSP），不再内联 spec URL
+//   - /swagger-init.js     由 RegisterStatic 从 embed.FS 提供，里面把 spec URL
+//     指向 /api/v1/openapi.json
 //
 // 这些断言看似机械，但它们守住「spec 真的被嵌入 + UI 真的指向同一份 spec」
-// 这条最容易被静默打破的契约。
+// 这条最容易被静默打破的契约——任何一环断裂（HTML 找不到 init 脚本、
+// init 脚本拿不到 spec URL、static FS 没把 swagger-init.js 嵌进去）都会被这里捕获。
 func TestHub_OpenAPI_ExposesSpec(t *testing.T) {
 	hub := newTestHub(t)
 	engine := gin.New()
 	hub.RegisterRoutes(engine)
+	// /swagger-init.js 由 RegisterStatic 提供（vendored from embed.FS），
+	// 必须挂上才能验证完整的 HTML→init.js→spec URL 链条。
+	hub.RegisterStatic(engine)
 
 	t.Run("yaml spec served", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.yaml", nil)
@@ -405,13 +412,43 @@ func TestHub_OpenAPI_ExposesSpec(t *testing.T) {
 			t.Errorf("/api/docs Content-Type = %q, want text/html*", ct)
 		}
 		body := w.Body.String()
-		// UI 必须真的指向同一份 spec，否则就是「文档在线但永远空白」的低级错误。
+		// HTML 引用了三件套：vendor 的 swagger-ui CSS/JS + 外置 init 脚本。
+		// init 脚本承载 spec URL（外置而非内联是为了满足严格 CSP 的 script-src 'self'）。
+		for _, marker := range []string{
+			"/swagger/swagger-ui.css",
+			"/swagger/swagger-ui-bundle.js",
+			"/swagger-init.js",
+		} {
+			if !strings.Contains(body, marker) {
+				t.Errorf("/api/docs HTML missing %q; head=%q",
+					marker, body[:min(400, len(body))])
+			}
+		}
+	})
+
+	t.Run("swagger init script served", func(t *testing.T) {
+		// /swagger-init.js 必须由 RegisterStatic 从 embed.FS 提供（不能掉到 NoRoute
+		// SPA 兜底，否则浏览器拿到 HTML 当 JS 解析直接 SyntaxError）。
+		req := httptest.NewRequest(http.MethodGet, "/swagger-init.js", nil)
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("/swagger-init.js status = %d, want 200; body=%s",
+				w.Code, w.Body.String())
+		}
+		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") &&
+			!strings.HasPrefix(ct, "application/javascript") {
+			t.Errorf("/swagger-init.js Content-Type = %q, want *javascript*", ct)
+		}
+		body := w.Body.String()
+		// init 脚本里实际把 spec URL 喂给 SwaggerUIBundle —— 这是契约的最后一环。
 		if !strings.Contains(body, "/api/v1/openapi.json") {
-			t.Errorf("/api/docs HTML missing /api/v1/openapi.json reference; head=%q",
+			t.Errorf("/swagger-init.js missing /api/v1/openapi.json reference; head=%q",
 				body[:min(400, len(body))])
 		}
-		if !strings.Contains(body, "swagger-ui") {
-			t.Errorf("/api/docs HTML doesn't reference swagger-ui resources")
+		if !strings.Contains(body, "SwaggerUIBundle") {
+			t.Errorf("/swagger-init.js doesn't initialize SwaggerUIBundle; head=%q",
+				body[:min(400, len(body))])
 		}
 	})
 }
@@ -1131,9 +1168,9 @@ func (h *hybridIDP) Identify(ctx context.Context, r *http.Request) (*model.User,
 //     bypass token validation by stubbing the IDP. They verify the mint+revoke
 //     surface but never exercise the validate→GetTokenNamespace→PublishVersion
 //     wiring end-to-end. A regression in any of:
-//       * auth.Service.ValidateToken returning the wrong NamespaceID
-//       * middleware.RequireAuth not propagating TokenNamespaceKey
-//       * SkillService.PublishVersion not honoring req.TokenNamespace
+//   - auth.Service.ValidateToken returning the wrong NamespaceID
+//   - middleware.RequireAuth not propagating TokenNamespaceKey
+//   - SkillService.PublishVersion not honoring req.TokenNamespace
 //     would silently pass those tests but break real CI publish jobs.
 //
 // Test flow:
@@ -1221,8 +1258,10 @@ func TestHub_TeamToken_PublishSkillE2E(t *testing.T) {
 	//    namespace to attempt (avoids false negatives from "namespace not
 	//    found" masking the "wrong namespace" check).
 	for _, slug := range []string{"acme", "bystander"} {
+		// strings.Title 已废弃；slug 这里都是纯 ASCII，手工做首字母大写避免引入 x/text。
+		displayName := strings.ToUpper(slug[:1]) + slug[1:]
 		code, body := doJSON(http.MethodPost, "/api/v1/namespaces", "alice", map[string]any{
-			"slug": slug, "displayName": strings.Title(slug), "type": "team",
+			"slug": slug, "displayName": displayName, "type": "team",
 		})
 		if code != http.StatusCreated && code != http.StatusOK {
 			t.Fatalf("create namespace %s: status=%d body=%s", slug, code, body)

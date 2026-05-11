@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/cinience/skillhub/pkg/auth"
@@ -103,12 +102,6 @@ type Server struct {
 	idp auth.IdentityProvider
 
 	h handlers
-
-	// shutdownOnce 保证 Shutdown 幂等：cmd/skillhub/main.go 既有
-	// Hub.Run 内部的 ctx.Done() → Shutdown，又有 defer Hub.Close() → Shutdown，
-	// 旧逻辑会让 deviceSvc/oauthSvc/rateLimiter 各自的 close(channel) 二次执行而 panic。
-	shutdownOnce sync.Once
-	shutdownErr  error
 }
 
 // New 是 NewWithDeps(cfg, Deps{}) 的兼容别名，行为与旧版完全一致。
@@ -358,38 +351,38 @@ func (s *Server) NewDefaultEngine() *gin.Engine {
 	return router
 }
 
+// Shutdown 不是幂等的——deviceSvc/oauthSvc/rateLimiter 内部 close(channel)
+// 如果二次执行会 panic。"只关一次"由上层 skillhub.Hub.Close() 的 sync.Once 兜底；
+// 直接复用 Server 的嵌入方需自行保证不重复调用本方法。
 func (s *Server) Shutdown(ctx context.Context) error {
-	s.shutdownOnce.Do(func() {
-		var firstErr error
-		if s.httpServer != nil {
-			if err := s.httpServer.Shutdown(ctx); err != nil {
+	var firstErr error
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			firstErr = err
+		}
+	}
+	if s.deviceSvc != nil {
+		s.deviceSvc.Close()
+	}
+	if s.oauthSvc != nil {
+		s.oauthSvc.Close()
+	}
+	if s.rateLimiter != nil {
+		s.rateLimiter.Close()
+	}
+	if s.searchClient != nil {
+		if err := s.searchClient.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if s.db != nil {
+		if sqlDB, err := s.db.DB(); err == nil {
+			if err := sqlDB.Close(); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}
-		if s.deviceSvc != nil {
-			s.deviceSvc.Close()
-		}
-		if s.oauthSvc != nil {
-			s.oauthSvc.Close()
-		}
-		if s.rateLimiter != nil {
-			s.rateLimiter.Close()
-		}
-		if s.searchClient != nil {
-			if err := s.searchClient.Close(); err != nil && firstErr == nil {
-				firstErr = err
-			}
-		}
-		if s.db != nil {
-			if sqlDB, err := s.db.DB(); err == nil {
-				if err := sqlDB.Close(); err != nil && firstErr == nil {
-					firstErr = err
-				}
-			}
-		}
-		s.shutdownErr = firstErr
-	})
-	return s.shutdownErr
+	}
+	return firstErr
 }
 
 // autoSetup creates an admin user on first startup if SKILLHUB_ADMIN_USER

@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/config"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
+	"github.com/google/uuid"
 )
 
 // OAuthProvider holds resolved OAuth endpoints for a provider.
@@ -349,7 +349,7 @@ func exchangeCode(p *OAuthProvider, code, redirectURI string) (string, error) {
 }
 
 func fetchUserInfo(p *OAuthProvider, accessToken string) (*OAuthUserInfo, error) {
-	req, err := http.NewRequest("GET", p.UserInfoURL, nil)
+	req, err := http.NewRequest(http.MethodGet, p.UserInfoURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}

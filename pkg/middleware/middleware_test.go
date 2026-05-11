@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/cinience/skillhub/pkg/config"
 	"github.com/cinience/skillhub/pkg/model"
+	"github.com/gin-gonic/gin"
 )
 
 func init() {

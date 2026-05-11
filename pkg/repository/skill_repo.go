@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/model"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -147,7 +147,7 @@ func (r *SkillRepo) List(ctx context.Context, limit int, cursor string, sort str
 }
 
 // ListAllForAdmin returns all skills for admin management, with optional visibility filter.
-func (r *SkillRepo) ListAllForAdmin(ctx context.Context, limit int, cursor string, visibility string) ([]model.SkillWithOwner, string, error) {
+func (r *SkillRepo) ListAllForAdmin(ctx context.Context, limit int, cursor, visibility string) ([]model.SkillWithOwner, string, error) {
 	q := r.db.WithContext(ctx).
 		Table("skills").
 		Select("skills.*, users.handle AS owner_handle, users.display_name AS owner_display_name, users.avatar_url AS owner_avatar_url").
@@ -207,7 +207,7 @@ func (r *SkillRepo) UpdateLatestVersion(ctx context.Context, skillID uuid.UUID, 
 // SetLatestVersion repoints the latest pointer without incrementing
 // versions_count. Used to recover after a yank invalidates the previous
 // latest. Pass uuid.Nil to clear when no eligible version remains.
-func (r *SkillRepo) SetLatestVersion(ctx context.Context, skillID uuid.UUID, versionID uuid.UUID) error {
+func (r *SkillRepo) SetLatestVersion(ctx context.Context, skillID, versionID uuid.UUID) error {
 	updates := map[string]interface{}{"updated_at": time.Now()}
 	if versionID == uuid.Nil {
 		updates["latest_version_id"] = nil

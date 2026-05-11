@@ -6,13 +6,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/auth"
 	"github.com/cinience/skillhub/pkg/metrics"
 	"github.com/cinience/skillhub/pkg/middleware"
 	"github.com/cinience/skillhub/pkg/repository"
 	"github.com/cinience/skillhub/pkg/service"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 var validScopes = []string{"full", "read", "publish"}
@@ -36,6 +36,7 @@ const maxTeamTokenLifetime = 365 * 24 * time.Hour
 //     (typical fleets cluster around 10-30 active credentials per team)
 //   - low enough that an automated mint-loop trips the limit within minutes,
 //     before the namespace's token table grows into the thousands
+//
 // Owners can rotate by revoking old tokens; we do not auto-purge expired ones
 // from this count because the repo's CountActiveByNamespace already filters
 // revoked_at IS NULL but does NOT filter on expiresAt — that's intentional,
@@ -301,10 +302,10 @@ func (h *TokenHandler) CreateForNamespace(c *gin.Context) {
 //
 // Query params:
 //   - limit  : page size (1..100). Default defaultListLimit. Out-of-range
-//              values fall back to the default rather than 400 — a paged list
-//              should be tolerant of typos in tooling.
+//     values fall back to the default rather than 400 — a paged list
+//     should be tolerant of typos in tooling.
 //   - cursor : opaque continuation token from a previous response's
-//              `nextCursor`. Empty for the first page.
+//     `nextCursor`. Empty for the first page.
 //
 // Response shape:
 //

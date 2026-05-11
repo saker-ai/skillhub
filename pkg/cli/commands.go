@@ -263,7 +263,7 @@ func Install(args []string) {
 
 	// Create skill directory
 	skillDir := filepath.Join(loadSkillsDir(), slug)
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		exitWithError(fmt.Sprintf("creating directory: %v", err))
 	}
 
@@ -300,7 +300,7 @@ func Install(args []string) {
 			continue
 		}
 
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			exitWithError(fmt.Sprintf("creating directory: %v", err))
 		}
 
@@ -331,7 +331,8 @@ func Install(args []string) {
 		"slug":        slug,
 	}
 	metaData, _ := json.MarshalIndent(meta, "", "  ")
-	os.WriteFile(filepath.Join(skillDir, ".installed.json"), metaData, 0644)
+	// 元数据写失败不影响 skill 文件本身可用——只是后续 `list/upgrade` 会缺失版本信息。
+	_ = os.WriteFile(filepath.Join(skillDir, ".installed.json"), metaData, 0o644)
 
 	printSuccess(fmt.Sprintf("Installed %s@%s to %s", slug, version, skillDir))
 }
@@ -382,7 +383,8 @@ func Installed(args []string) {
 			continue
 		}
 		var meta map[string]interface{}
-		json.Unmarshal(data, &meta)
+		// 损坏的 .installed.json 仍想列出条目（getStr 对 nil map 安全），打印 unknown。
+		_ = json.Unmarshal(data, &meta)
 		rows = append(rows, []string{
 			entry.Name(),
 			getStr(meta, "version"),
@@ -453,7 +455,8 @@ func Update(args []string) {
 			continue
 		}
 		var meta map[string]interface{}
-		json.Unmarshal(data, &meta)
+		// 损坏的 .installed.json: getStr 对 nil map 返回 ""，下面的 currentVer 比较会跳过。
+		_ = json.Unmarshal(data, &meta)
 		currentVer := getStr(meta, "version")
 
 		// Get latest version info via versions endpoint

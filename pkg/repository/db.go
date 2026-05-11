@@ -63,7 +63,7 @@ func NewDBWithOptions(cfg config.DatabaseConfig, opts DBOptions) (*gorm.DB, erro
 		if dbPath == "" {
 			dbPath = "./data/skillhub.db"
 		}
-		if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 			return nil, fmt.Errorf("create database directory: %w", err)
 		}
 		dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000"

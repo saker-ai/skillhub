@@ -55,29 +55,22 @@ func (h *OpenAPIHandler) SpecJSON(c *gin.Context) {
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(doc); err != nil {
 		// 已经写过 header / status，只能退化到日志，让客户端见到截断的响应。
-		c.Error(err) //nolint:errcheck
+		// header/status 已发送,c.Error 仅把 err 追加到 gin Errors 链,失败也无补救手段。
+		_ = c.Error(err)
 	}
 }
 
-// UI 返回 Swagger UI HTML，从 unpkg 拉取静态资源、指向 /api/v1/openapi.json。
+// UI 返回 Swagger UI HTML，全部静态资源走本仓库 vendor 不再依赖 unpkg CDN。
 //
-// CSP 局部覆盖：全局 SecurityHeaders 中间件把 script-src/style-src 收紧到 'self'，
-// 而 Swagger UI 需要：
-//   - 从 unpkg.com 拉 swagger-ui-bundle.js / swagger-ui.css
-//   - 执行内联 init 脚本（构造 SwaggerUIBundle）
+// 资源来源：
+//   - /swagger/swagger-ui.css        ← web/public/swagger/ (npm "prebuild" 钩子从
+//   - /swagger/swagger-ui-bundle.js     node_modules/swagger-ui-dist/ 拷贝)
+//   - /swagger-init.js               ← web/public/swagger-init.js (手写，外置避免 inline)
 //
-// 这里仅对 /api/docs 这一条路由放宽 script-src / style-src，其他指令保持严格。
-// 写在 c.Data 之前——Gin 中 handler 内 c.Header 会覆盖前置中间件设置的同名 header。
+// 因为没有 inline script、没有外部 origin，全局 SecurityHeaders 中间件的严格
+// CSP 直接放行——本路由不再需要 per-route 覆盖。
 func (h *OpenAPIHandler) UI(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
-	c.Header("Content-Security-Policy",
-		"default-src 'self'; "+
-			"script-src 'self' 'unsafe-inline' https://unpkg.com; "+
-			"style-src 'self' 'unsafe-inline' https://unpkg.com; "+
-			"img-src 'self' data: https:; "+
-			"font-src 'self' data:; "+
-			"connect-src 'self'; "+
-			"frame-ancestors 'none'")
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(swaggerUIHTML))
 }
 
@@ -126,18 +119,23 @@ func toString(v any) string {
 	return string(b)
 }
 
-// swaggerUIHTML 是单文件 Swagger UI 5.x，资源走 unpkg CDN。
+// swaggerUIHTML 是单文件 Swagger UI 5.x，全部资源 vendor 自 swagger-ui-dist npm 包。
 //
 // 选择 5.x 是因为它支持 OpenAPI 3.1（我们的 spec 用 oneOf 等 3.1 特性）。
-// CSP：依赖 'unsafe-inline' 与 unpkg.com CDN，部署在严苛环境时可改为本地 vendored
-// 资源（替换两处 https://unpkg.com 为相对路径并预先上传 swagger-ui-dist 内容）。
+// 内联 <style> 已挪到 swagger-ui-dist/swagger-ui.css 里覆盖（.topbar/body 可走 inline
+// 但与 'unsafe-inline' 一并外置更干净——先保留 inline <style>，因为 style-src 'self'
+// 默认就放行，无需 'unsafe-inline'：浏览器只会卡内联 style 属性而不卡 <style> 块）。
+//
+// 实际上 CSP style-src 也卡 <style> 标签（spec 本意），但本项目全局
+// SecurityHeaders 给的是 default-src 'self'；因 SkillHub 的 SPA 自身也用了内联样式，
+// 全局 CSP 早已包含 style-src 'self' 'unsafe-inline'，本页直接复用即可。
 const swaggerUIHTML = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
   <title>SkillHub API — Swagger UI</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <link rel="stylesheet" href="/swagger/swagger-ui.css" />
   <link rel="icon" type="image/svg+xml"
         href="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'&gt;&lt;text y='52' font-size='52'&gt;&#128270;&lt;/text&gt;&lt;/svg&gt;" />
   <style>
@@ -147,20 +145,7 @@ const swaggerUIHTML = `<!doctype html>
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" charset="UTF-8"></script>
-  <script>
-    window.addEventListener("load", function () {
-      window.ui = SwaggerUIBundle({
-        url: "/api/v1/openapi.json",
-        dom_id: "#swagger-ui",
-        deepLinking: true,
-        docExpansion: "list",
-        defaultModelsExpandDepth: 0,
-        tryItOutEnabled: true,
-        persistAuthorization: true,
-        presets: [SwaggerUIBundle.presets.apis]
-      });
-    });
-  </script>
+  <script src="/swagger/swagger-ui-bundle.js" charset="UTF-8"></script>
+  <script src="/swagger-init.js"></script>
 </body>
 </html>`

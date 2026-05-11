@@ -3,8 +3,8 @@ package repository
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/model"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

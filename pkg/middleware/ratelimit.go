@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/cinience/skillhub/pkg/config"
+	"github.com/gin-gonic/gin"
 )
 
 type rateBucket struct {
@@ -89,7 +89,7 @@ func (rl *RateLimiter) cleanup() {
 	}
 }
 
-func (rl *RateLimiter) getBucket(key string, limit int, windowSecs int) *rateBucket {
+func (rl *RateLimiter) getBucket(key string, limit, windowSecs int) *rateBucket {
 	fullKey := key + ":" + strconv.Itoa(limit)
 	actual, _ := rl.buckets.LoadOrStore(fullKey, &rateBucket{
 		limit:  limit,

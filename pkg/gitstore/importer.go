@@ -82,9 +82,9 @@ func ParseGitHubWebhook(payload []byte) (*WebhookEvent, error) {
 // ParseGitLabWebhook parses a GitLab tag push webhook payload.
 func ParseGitLabWebhook(payload []byte) (*WebhookEvent, error) {
 	var data struct {
-		Ref        string `json:"ref"`
+		Ref         string `json:"ref"`
 		CheckoutSHA string `json:"checkout_sha"`
-		Project    struct {
+		Project     struct {
 			GitHTTPURL string `json:"git_http_url"`
 		} `json:"project"`
 	}
@@ -145,7 +145,7 @@ func (i *ImportService) HandleWebhook(ctx context.Context, event *WebhookEvent) 
 		}
 	} else {
 		// Clone bare
-		if err := os.MkdirAll(filepath.Dir(repoPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(repoPath), 0o755); err != nil {
 			return err
 		}
 		cmd := exec.CommandContext(ctx, "git", "clone", "--bare", event.RepoURL, repoPath)
@@ -178,7 +178,7 @@ func (i *ImportService) ImportFromURL(ctx context.Context, repoURL string, opts 
 	}
 
 	repoPath := i.gitStore.RepoPath(owner, slug)
-	if err := os.MkdirAll(filepath.Dir(repoPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(repoPath), 0o755); err != nil {
 		return err
 	}
 

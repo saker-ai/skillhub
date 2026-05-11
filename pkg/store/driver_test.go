@@ -16,11 +16,11 @@ type fakeBackend struct{ name string }
 func (f *fakeBackend) Publish(context.Context, store.PublishOpts) (string, error) {
 	return f.name, nil
 }
-func (*fakeBackend) Archive(string, string, string) (io.ReadCloser, error)    { return nil, nil }
-func (*fakeBackend) GetFile(string, string, string, string) ([]byte, error)   { return nil, nil }
-func (*fakeBackend) ListVersions(string, string) ([]string, error)            { return nil, nil }
-func (*fakeBackend) Exists(string, string) bool                               { return false }
-func (*fakeBackend) Rename(string, string, string) error                      { return nil }
+func (*fakeBackend) Archive(string, string, string) (io.ReadCloser, error)  { return nil, nil }
+func (*fakeBackend) GetFile(string, string, string, string) ([]byte, error) { return nil, nil }
+func (*fakeBackend) ListVersions(string, string) ([]string, error)          { return nil, nil }
+func (*fakeBackend) Exists(string, string) bool                             { return false }
+func (*fakeBackend) Rename(string, string, string) error                    { return nil }
 
 // 阶段 3 注册表覆盖：name 默认值 + 未知 driver + 重复注册 panic。
 //

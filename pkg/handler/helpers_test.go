@@ -30,5 +30,3 @@ func TestSplitTags(t *testing.T) {
 		}
 	}
 }
-
-

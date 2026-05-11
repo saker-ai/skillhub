@@ -9,13 +9,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub"
 	"github.com/cinience/skillhub/pkg/auth"
 	"github.com/cinience/skillhub/pkg/cli"
 	"github.com/cinience/skillhub/pkg/config"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
+	"github.com/google/uuid"
 
 	// Blank imports register all built-in store backends with the driver
 	// registry (pkg/store). 独立二进制保持「全功能」语义——支持
@@ -85,9 +85,14 @@ func runServer() {
 
 	hub, err := skillhub.New(ctx, skillhub.WithConfig(cfg))
 	if err != nil {
-		log.Fatalf("failed to create hub: %v", err)
+		// 不能用 log.Fatalf——上面 defer cancel() 不会跑。
+		// signal.NotifyContext 注册的 SIGINT/SIGTERM handler 也不会被解除，
+		// 但进程要立刻退出，cancel() 仅做形式上的清理。
+		cancel()
+		log.Printf("failed to create hub: %v", err)
+		os.Exit(1)
 	}
-	defer hub.Close()
+	defer func() { _ = hub.Close() }()
 
 	log.Printf("SkillHub starting on %s:%d", cfg.Server.Host, cfg.Server.Port)
 	if err := hub.Run(ctx); err != nil && err != http.ErrServerClosed {

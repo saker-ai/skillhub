@@ -11,9 +11,6 @@ import (
 	bleveSearch "github.com/blevesearch/bleve/v2/search"
 	"github.com/blevesearch/bleve/v2/search/searcher"
 	"github.com/cinience/skillhub/pkg/config"
-
-	// Ensure searcher init runs (needed for DisjunctionMaxClauseCount).
-	_ "github.com/blevesearch/bleve/v2/search/searcher"
 )
 
 // Suppress unused import warning.

@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/cinience/skillhub/pkg/auth"
+	"github.com/gin-gonic/gin"
 )
 
 // WebAuthHandler handles login/logout for the SPA frontend.
