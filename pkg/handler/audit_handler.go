@@ -38,7 +38,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 
 	logs, nextCursor, err := h.svc.List(c.Request.Context(), limit, cursor, filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "list_audit_logs", err)
 		return
 	}
 

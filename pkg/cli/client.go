@@ -182,6 +182,69 @@ func (c *Client) Publish(slug, version, summary, tags, changelog, category strin
 	return result, nil
 }
 
+// ============================================================================
+// Team-token endpoints — /api/v1/namespaces/:slug/tokens
+// ============================================================================
+
+// ListTeamTokens calls GET /api/v1/namespaces/:slug/tokens.
+func (c *Client) ListTeamTokens(nsSlug string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.getJSON("/api/v1/namespaces/"+url.PathEscape(nsSlug)+"/tokens", &result)
+	return result, err
+}
+
+// CreateTeamToken calls POST /api/v1/namespaces/:slug/tokens.
+// expiresIn is required server-side; pass strings like "720h" or "90d-style"
+// (the server uses time.ParseDuration so "d" is NOT a valid suffix — pass hours).
+func (c *Client) CreateTeamToken(nsSlug, label, scope, expiresIn string) (map[string]interface{}, error) {
+	body := map[string]string{}
+	if label != "" {
+		body["label"] = label
+	}
+	if scope != "" {
+		body["scope"] = scope
+	}
+	if expiresIn != "" {
+		body["expiresIn"] = expiresIn
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal: %w", err)
+	}
+
+	resp, err := c.do("POST", "/api/v1/namespaces/"+url.PathEscape(nsSlug)+"/tokens",
+		bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Created (201) is the success path; anything else is an API error.
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return nil, parseAPIError(resp)
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return result, nil
+}
+
+// RevokeTeamToken calls DELETE /api/v1/namespaces/:slug/tokens/:id.
+func (c *Client) RevokeTeamToken(nsSlug, tokenID string) error {
+	resp, err := c.do("DELETE",
+		"/api/v1/namespaces/"+url.PathEscape(nsSlug)+"/tokens/"+url.PathEscape(tokenID),
+		nil, "")
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return parseAPIError(resp)
+	}
+	return nil
+}
+
 // ReadDirFiles reads all files from a directory path, returning a map of relative path -> content.
 func ReadDirFiles(dirPath string) (map[string][]byte, error) {
 	files := make(map[string][]byte)

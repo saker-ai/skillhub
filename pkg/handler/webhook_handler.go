@@ -57,7 +57,7 @@ func (h *WebhookHandler) handleWebhook(c *gin.Context, provider, signature strin
 	event.Provider = provider
 
 	if err := h.importSvc.HandleWebhook(c.Request.Context(), event); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "handle_webhook", err)
 		return
 	}
 

@@ -20,7 +20,7 @@ func NewDeviceAuthHandler(deviceSvc *auth.DeviceAuthService) *DeviceAuthHandler 
 func (h *DeviceAuthHandler) RequestCode(c *gin.Context) {
 	resp, err := h.deviceSvc.CreateCode()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "device_create_code", err)
 		return
 	}
 	c.JSON(http.StatusOK, resp)

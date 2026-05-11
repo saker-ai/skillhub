@@ -1,4 +1,14 @@
-package store
+// Package s3 是 SkillHub 的 AWS S3（含 S3 兼容服务，如 MinIO）backend 子包。
+//
+// 通过 init() 自注册到 store 驱动表，调用方只需 blank import：
+//
+//	import _ "github.com/cinience/skillhub/pkg/store/s3"
+//
+// 即可让 cfg.Store.Backend == "s3" 自动解析到本 backend。
+//
+// 嵌入方如果不需要 S3 后端，可跳过 blank import 以减小二进制大小
+// （不会链接 aws-sdk-go-v2，节省约几 MB）。
+package s3
 
 import (
 	"archive/zip"
@@ -7,12 +17,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/cinience/skillhub/pkg/config"
 	"github.com/cinience/skillhub/pkg/semver"
+	"github.com/cinience/skillhub/pkg/store"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -20,24 +32,31 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-// S3Config holds configuration for the S3 storage backend.
-type S3Config struct {
-	Bucket    string `yaml:"bucket"`
-	Region    string `yaml:"region"`
-	Prefix    string `yaml:"prefix"`     // object key prefix, default "skills"
-	Endpoint  string `yaml:"endpoint"`   // custom endpoint (MinIO, etc.)
-	AccessKey string `yaml:"access_key"` // optional, defaults to IAM
-	SecretKey string `yaml:"secret_key"`
+func init() {
+	store.Register("s3", openS3)
 }
 
-// S3Backend implements Store using AWS S3 (or S3-compatible) storage.
-type S3Backend struct {
+// openS3 是 store.Factory 实现：从 OpenContext 取出 cfg.S3 子树并构造 Backend。
+func openS3(oc store.OpenContext) (store.Store, error) {
+	return New(oc.Cfg.S3)
+}
+
+// Config 是 S3 backend 的旧版直构造配置。
+//
+// 为兼容嵌入方现有代码（NewWithConfig 等命名），保留本类型并提供与
+// config.StoreS3Config 互相转换的能力，但配置文件路径仍走 config 包。
+type Config = config.StoreS3Config
+
+// Backend implements store.Store using AWS S3 (or S3-compatible) storage.
+type Backend struct {
 	client *s3.Client
 	bucket string
 	prefix string
 }
 
-func NewS3Backend(cfg S3Config) (*S3Backend, error) {
+// New 是直接构造入口（不经过 driver registry）。
+// 推荐路径仍是 store.Open("s3", ...)。
+func New(cfg Config) (*Backend, error) {
 	ctx := context.Background()
 
 	var opts []func(*awsconfig.LoadOptions) error
@@ -70,7 +89,7 @@ func NewS3Backend(cfg S3Config) (*S3Backend, error) {
 		prefix = "skills"
 	}
 
-	return &S3Backend{
+	return &Backend{
 		client: client,
 		bucket: cfg.Bucket,
 		prefix: prefix,
@@ -78,31 +97,22 @@ func NewS3Backend(cfg S3Config) (*S3Backend, error) {
 }
 
 // key builds an S3 object key: {prefix}/{owner}/{slug}/versions/{version}/files/{path}
-func (b *S3Backend) key(owner, slug, version, filePath string) string {
-	filePath = sanitizeStorePath(filePath)
+func (b *Backend) key(owner, slug, version, filePath string) string {
+	filePath = store.SanitizeStorePath(filePath)
 	return fmt.Sprintf("%s/%s/%s/versions/%s/files/%s", b.prefix, owner, slug, version, filePath)
 }
 
 // metaKey returns the metadata object key for a version.
-func (b *S3Backend) metaKey(owner, slug, version string) string {
+func (b *Backend) metaKey(owner, slug, version string) string {
 	return fmt.Sprintf("%s/%s/%s/versions/%s/meta.json", b.prefix, owner, slug, version)
 }
 
 // versionPrefix returns the prefix for listing all versions of a skill.
-func (b *S3Backend) versionPrefix(owner, slug string) string {
+func (b *Backend) versionPrefix(owner, slug string) string {
 	return fmt.Sprintf("%s/%s/%s/versions/", b.prefix, owner, slug)
 }
 
-type publishMeta struct {
-	Version   string    `json:"version"`
-	Author    string    `json:"author"`
-	Email     string    `json:"email"`
-	Message   string    `json:"message"`
-	Tags      []string  `json:"tags,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-func (b *S3Backend) Publish(ctx context.Context, opts PublishOpts) (string, error) {
+func (b *Backend) Publish(ctx context.Context, opts store.PublishOpts) (string, error) {
 	// Upload each file
 	for filePath, content := range opts.Files {
 		key := b.key(opts.Owner, opts.Slug, opts.Version, filePath)
@@ -117,7 +127,7 @@ func (b *S3Backend) Publish(ctx context.Context, opts PublishOpts) (string, erro
 	}
 
 	// Write version metadata
-	meta := publishMeta{
+	meta := store.PublishMeta{
 		Version:   opts.Version,
 		Author:    opts.Author,
 		Email:     opts.Email,
@@ -139,7 +149,7 @@ func (b *S3Backend) Publish(ctx context.Context, opts PublishOpts) (string, erro
 	return fmt.Sprintf("s3://%s/%s", b.bucket, metaKey), nil
 }
 
-func (b *S3Backend) Archive(owner, slug, version string) (io.ReadCloser, error) {
+func (b *Backend) Archive(owner, slug, version string) (io.ReadCloser, error) {
 	ctx := context.Background()
 	prefix := b.key(owner, slug, version, "")
 
@@ -197,7 +207,7 @@ func (b *S3Backend) Archive(owner, slug, version string) (io.ReadCloser, error) 
 	return io.NopCloser(bytes.NewReader(buf.Bytes())), nil
 }
 
-func (b *S3Backend) GetFile(owner, slug, version, path string) ([]byte, error) {
+func (b *Backend) GetFile(owner, slug, version, path string) ([]byte, error) {
 	ctx := context.Background()
 	key := b.key(owner, slug, version, path)
 
@@ -213,7 +223,7 @@ func (b *S3Backend) GetFile(owner, slug, version, path string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(out.Body, 10<<20)) // 10MB limit
 }
 
-func (b *S3Backend) ListVersions(owner, slug string) ([]string, error) {
+func (b *Backend) ListVersions(owner, slug string) ([]string, error) {
 	ctx := context.Background()
 	prefix := b.versionPrefix(owner, slug)
 	delimiter := "/"
@@ -248,7 +258,7 @@ func (b *S3Backend) ListVersions(owner, slug string) ([]string, error) {
 	return versions, nil
 }
 
-func (b *S3Backend) Exists(owner, slug string) bool {
+func (b *Backend) Exists(owner, slug string) bool {
 	ctx := context.Background()
 	prefix := b.versionPrefix(owner, slug)
 	maxKeys := int32(1)
@@ -264,7 +274,7 @@ func (b *S3Backend) Exists(owner, slug string) bool {
 	return len(out.Contents) > 0
 }
 
-func (b *S3Backend) Rename(owner, oldSlug, newSlug string) error {
+func (b *Backend) Rename(owner, oldSlug, newSlug string) error {
 	ctx := context.Background()
 	oldPrefix := fmt.Sprintf("%s/%s/%s/", b.prefix, owner, oldSlug)
 	newPrefix := fmt.Sprintf("%s/%s/%s/", b.prefix, owner, newSlug)
@@ -304,7 +314,7 @@ func (b *S3Backend) Rename(owner, oldSlug, newSlug string) error {
 			Bucket: &b.bucket,
 			Key:    &k,
 		}); err != nil {
-			log.Printf("warning: failed to delete old key %s during rename: %v", key, err)
+			slog.Default().Warn("failed to delete old key during rename", "key", key, "err", err)
 		}
 	}
 

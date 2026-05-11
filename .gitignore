@@ -46,3 +46,4 @@ data/
 web/node_modules/
 web/static/
 .omx/
+.animus/

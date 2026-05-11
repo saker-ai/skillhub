@@ -4,7 +4,9 @@
     "search": "Search",
     "publish": "Publish",
     "login": "Login",
-    "logout": "Logout"
+    "logout": "Logout",
+    "namespaces": "Namespaces",
+    "api": "API Docs"
   },
   "footer": {
     "tagline": "SkillHub — A skill registry for AI agents."
@@ -16,7 +18,14 @@
     "browse": "Browse Skills",
     "publish": "Publish a Skill",
     "popular": "Popular Skills",
-    "view_all": "View all skills"
+    "view_all": "View all skills",
+    "install_heading": "Install via your AI agent",
+    "install_tab_agent": "For Agent",
+    "install_tab_human": "For Human",
+    "install_prompt": "Read {{url}} and follow the instructions to install skillhub skills for me.",
+    "install_hint": "Paste this into your agent chat — the registry is API-first, no SDK required.",
+    "install_human_command": "npx skills add <owner>/<skill>",
+    "install_hint_human": "Run in your terminal — replace <owner>/<skill> with the skill you want to install."
   },
   "skills": {
     "title": "Skills",
@@ -42,7 +51,9 @@
     "download_zip": "Download ZIP",
     "version_history": "Version History",
     "no_content": "No SKILL.md content available.",
-    "not_found": "Skill not found"
+    "not_found": "Skill not found",
+    "tab_readme": "README",
+    "tab_skill_md": "SKILL.md"
   },
   "search": {
     "placeholder": "Search skills...",
@@ -128,6 +139,47 @@
     "copied": "Copied!",
     "loading": "Loading...",
     "toggle_theme": "Toggle theme",
-    "switch_lang": "Switch language"
+    "switch_lang": "Switch language",
+    "cancel": "Cancel",
+    "dismiss": "Dismiss"
+  },
+  "namespaces": {
+    "title": "Namespaces",
+    "create_btn": "New namespace",
+    "create_title": "Create namespace",
+    "slug": "Slug",
+    "slug_hint": "Lowercase letters, digits, hyphens. e.g. acme-team",
+    "display_name": "Display name",
+    "description": "Description",
+    "create_submit": "Create",
+    "empty": "You don't belong to any namespaces yet.",
+    "back": "Back to namespaces",
+    "members": "Members",
+    "not_found": "Namespace not found"
+  },
+  "tokens": {
+    "title": "Team tokens",
+    "create_btn": "New token",
+    "label": "Label",
+    "scope": "Scope",
+    "scope_hint": "publish allows uploading skills; read is read-only.",
+    "expires_in": "Expires in",
+    "expires_hint": "Required. Maximum lifetime is 365 days.",
+    "create_submit": "Create token",
+    "empty": "No active team tokens.",
+    "never": "never",
+    "revoke": "Revoke",
+    "confirm_revoke": "Revoke this token? This cannot be undone.",
+    "show_once_warning": "Copy this token now — it will not be shown again.",
+    "expires_1d": "1 day",
+    "expires_7d": "7 days",
+    "expires_30d": "30 days",
+    "expires_90d": "90 days",
+    "expires_365d": "365 days",
+    "col_label": "Label",
+    "col_prefix": "Prefix",
+    "col_scope": "Scope",
+    "col_created": "Created",
+    "col_expires": "Expires"
   }
 }

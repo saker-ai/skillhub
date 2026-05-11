@@ -49,7 +49,7 @@ func (h *AuthHandler) CreateToken(c *gin.Context) {
 
 	rawToken, token, err := h.authSvc.CreateToken(c.Request.Context(), userID, req.Label, req.Scope, 0)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "admin_create_token", err)
 		return
 	}
 

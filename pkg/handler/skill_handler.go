@@ -2,23 +2,39 @@ package handler
 
 import (
 	"encoding/json"
-	"log"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/cinience/skillhub/pkg/middleware"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/service"
+	"github.com/gin-gonic/gin"
 )
 
 type SkillHandler struct {
-	svc *service.SkillService
+	svc    *service.SkillService
+	logger *slog.Logger
 }
 
 func NewSkillHandler(svc *service.SkillService) *SkillHandler {
 	return &SkillHandler{svc: svc}
+}
+
+// SetLogger 注入 *slog.Logger。nil 等价于走 slog.Default()。
+// 与 SetMetrics 同样必须在 Server 装配阶段调用。
+func (h *SkillHandler) SetLogger(lg *slog.Logger) {
+	h.logger = lg
+}
+
+func (h *SkillHandler) loggerOrDefault() *slog.Logger {
+	if h.logger != nil {
+		return h.logger
+	}
+	return slog.Default()
 }
 
 // List handles GET /api/v1/skills
@@ -34,7 +50,7 @@ func (h *SkillHandler) List(c *gin.Context) {
 	viewer := middleware.GetUser(c)
 	skills, nextCursor, err := h.svc.ListSkills(c.Request.Context(), limit, cursor, sort, category, viewer)
 	if err != nil {
-		log.Printf("ListSkills error: %v", err)
+		h.loggerOrDefault().Error("ListSkills error", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
@@ -51,7 +67,7 @@ func (h *SkillHandler) Get(c *gin.Context) {
 	viewer := middleware.GetUser(c)
 	skill, err := h.svc.GetSkill(c.Request.Context(), slug, viewer)
 	if err != nil {
-		log.Printf("GetSkill error: %v", err)
+		h.loggerOrDefault().Error("GetSkill error", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
@@ -82,16 +98,17 @@ func (h *SkillHandler) Publish(c *gin.Context) {
 	}
 
 	req := service.PublishRequest{
-		Slug:          c.PostForm("slug"),
-		Version:       c.PostForm("version"),
-		Changelog:     c.PostForm("changelog"),
-		DisplayName:   c.PostForm("displayName"),
-		Summary:       c.PostForm("summary"),
-		Category:      c.PostForm("category"),
-		Kind:          c.PostForm("kind"),
-		Visibility:    c.PostForm("visibility"),
-		NamespaceSlug: c.PostForm("namespace"),
-		Files:         files,
+		Slug:           c.PostForm("slug"),
+		Version:        c.PostForm("version"),
+		Changelog:      c.PostForm("changelog"),
+		DisplayName:    c.PostForm("displayName"),
+		Summary:        c.PostForm("summary"),
+		Category:       c.PostForm("category"),
+		Kind:           c.PostForm("kind"),
+		Visibility:     c.PostForm("visibility"),
+		NamespaceSlug:  c.PostForm("namespace"),
+		Files:          files,
+		TokenNamespace: middleware.GetTokenNamespace(c),
 	}
 	if tags := c.PostForm("tags"); tags != "" {
 		req.Tags = splitTags(tags)
@@ -117,7 +134,7 @@ func (h *SkillHandler) Publish(c *gin.Context) {
 
 	skill, version, err := h.svc.PublishVersion(c.Request.Context(), user, req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -136,8 +153,8 @@ func (h *SkillHandler) Delete(c *gin.Context) {
 	}
 	slug := c.Param("slug")
 
-	if err := h.svc.SoftDelete(c.Request.Context(), user, slug); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := h.svc.SoftDelete(c.Request.Context(), user, slug, middleware.GetTokenNamespace(c)); err != nil {
+		writeServiceError(c, err)
 		return
 	}
 
@@ -153,8 +170,8 @@ func (h *SkillHandler) Undelete(c *gin.Context) {
 	}
 	slug := c.Param("slug")
 
-	if err := h.svc.Undelete(c.Request.Context(), user, slug); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := h.svc.Undelete(c.Request.Context(), user, slug, middleware.GetTokenNamespace(c)); err != nil {
+		writeServiceError(c, err)
 		return
 	}
 
@@ -167,7 +184,7 @@ func (h *SkillHandler) Versions(c *gin.Context) {
 	viewer := middleware.GetUser(c)
 	versions, err := h.svc.GetVersions(c.Request.Context(), slug, viewer)
 	if err != nil {
-		log.Printf("GetVersions error: %v", err)
+		h.loggerOrDefault().Error("GetVersions error", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
@@ -182,7 +199,7 @@ func (h *SkillHandler) Version(c *gin.Context) {
 
 	version, err := h.svc.GetVersion(c.Request.Context(), slug, ver, viewer)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "get_skill_version", err)
 		return
 	}
 	if version == nil {
@@ -221,10 +238,16 @@ func (h *SkillHandler) YankVersion(c *gin.Context) {
 	var req struct {
 		Reason string `json:"reason"`
 	}
-	_ = c.ShouldBindJSON(&req)
+	// Reason is optional metadata, so an empty body (io.EOF) is fine — but a
+	// malformed body should fail loudly so the caller learns their JSON is
+	// broken instead of silently yanking with no reason recorded.
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+		return
+	}
 
-	if err := h.svc.YankVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), req.Reason); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := h.svc.YankVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), req.Reason, middleware.GetTokenNamespace(c)); err != nil {
+		writeServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "version yanked"})
@@ -237,8 +260,8 @@ func (h *SkillHandler) UnyankVersion(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	if err := h.svc.UnyankVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version")); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := h.svc.UnyankVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), middleware.GetTokenNamespace(c)); err != nil {
+		writeServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "version unyanked"})
@@ -254,10 +277,15 @@ func (h *SkillHandler) DeprecateVersion(c *gin.Context) {
 	var req struct {
 		Message string `json:"message"`
 	}
-	_ = c.ShouldBindJSON(&req)
+	// Message is optional, so an empty body (io.EOF) is fine — but reject
+	// malformed JSON instead of silently deprecating with no message.
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+		return
+	}
 
-	if err := h.svc.DeprecateVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), req.Message); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := h.svc.DeprecateVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), req.Message, middleware.GetTokenNamespace(c)); err != nil {
+		writeServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "version deprecated"})
@@ -270,8 +298,8 @@ func (h *SkillHandler) UndeprecateVersion(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	if err := h.svc.UndeprecateVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version")); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := h.svc.UndeprecateVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), middleware.GetTokenNamespace(c)); err != nil {
+		writeServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "version undeprecated"})
@@ -287,7 +315,7 @@ func (h *SkillHandler) RequestPublic(c *gin.Context) {
 	slug := c.Param("slug")
 
 	if err := h.svc.RequestPublic(c.Request.Context(), user, slug); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 

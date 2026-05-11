@@ -8,15 +8,22 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/google/uuid"
+	"github.com/cinience/skillhub"
 	"github.com/cinience/skillhub/pkg/auth"
 	"github.com/cinience/skillhub/pkg/cli"
 	"github.com/cinience/skillhub/pkg/config"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
-	"github.com/cinience/skillhub/pkg/server"
+
+	// Blank imports register all built-in store backends with the driver
+	// registry (pkg/store). 独立二进制保持「全功能」语义——支持
+	// cfg.Store.Backend == "git" / "s3" / "oss" 三种值。
+	// 嵌入方按需选择子集即可减小依赖体积。
+	_ "github.com/cinience/skillhub/pkg/store/git"
+	_ "github.com/cinience/skillhub/pkg/store/oss"
+	_ "github.com/cinience/skillhub/pkg/store/s3"
 )
 
 func main() {
@@ -50,6 +57,8 @@ func main() {
 		cli.Update(os.Args[2:])
 	case "publish":
 		cli.Publish(os.Args[2:])
+	case "team-token", "team-tokens":
+		cli.TeamTokens(os.Args[2:])
 	case "help", "--help", "-h":
 		cli.PrintUsage()
 	default:
@@ -69,27 +78,19 @@ func runServer() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	srv, err := server.New(cfg)
+	// signal.NotifyContext 是 Go 1.16+ 的标准做法，替代手写 channel + goroutine。
+	// ctx.Done() 触发后 Hub.Run 会调用底层 Shutdown，完成 graceful 退出。
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	hub, err := skillhub.New(ctx, skillhub.WithConfig(cfg))
 	if err != nil {
-		log.Fatalf("failed to create server: %v", err)
+		log.Fatalf("failed to create hub: %v", err)
 	}
-
-	// Graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigCh
-		log.Println("shutting down gracefully...")
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil {
-			log.Printf("shutdown error: %v", err)
-		}
-	}()
+	defer hub.Close()
 
 	log.Printf("SkillHub starting on %s:%d", cfg.Server.Host, cfg.Server.Port)
-	if err := srv.Run(); err != nil && err != http.ErrServerClosed {
+	if err := hub.Run(ctx); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
 	log.Println("server stopped")

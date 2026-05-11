@@ -5,16 +5,16 @@ import (
 	"context"
 	"fmt"
 	"html/template"
-	"log"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/cinience/skillhub/pkg/middleware"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/search"
+	"github.com/gin-gonic/gin"
 	"github.com/yuin/goldmark"
 )
 
@@ -69,6 +69,19 @@ type WebHandler struct {
 	searchCli WebSearchService
 	templates map[string]*template.Template
 	baseURL   string
+	logger    *slog.Logger
+}
+
+// SetLogger 注入 *slog.Logger。nil 等价于走 slog.Default()。
+func (h *WebHandler) SetLogger(lg *slog.Logger) {
+	h.logger = lg
+}
+
+func (h *WebHandler) loggerOrDefault() *slog.Logger {
+	if h.logger != nil {
+		return h.logger
+	}
+	return slog.Default()
 }
 
 // TemplateFuncMap returns the template function map used by the web handler.
@@ -135,7 +148,7 @@ func NewWebHandlerWithTemplate(svc WebSkillService, searchCli WebSearchService, 
 func (h *WebHandler) render(c *gin.Context, name string, data gin.H) {
 	tmpl, ok := h.templates[name]
 	if !ok {
-		log.Printf("template not found: %s", name)
+		h.loggerOrDefault().Error("template not found", "name", name)
 		c.String(http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
@@ -145,7 +158,7 @@ func (h *WebHandler) render(c *gin.Context, name string, data gin.H) {
 	}
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.ExecuteTemplate(c.Writer, name, data); err != nil {
-		log.Printf("template error: %v", err)
+		h.loggerOrDefault().Error("template error", "err", err)
 		c.String(http.StatusInternalServerError, "Internal Server Error")
 	}
 }

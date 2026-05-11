@@ -38,7 +38,7 @@ func (h *NamespaceHandler) Create(c *gin.Context) {
 
 	ns, err := h.svc.Create(c.Request.Context(), user, req.Slug, req.DisplayName, req.Description, req.Type)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -55,7 +55,7 @@ func (h *NamespaceHandler) List(c *gin.Context) {
 
 	namespaces, err := h.svc.ListByUser(c.Request.Context(), user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeInternalError(c, "list_user_namespaces", err)
 		return
 	}
 
@@ -105,7 +105,7 @@ func (h *NamespaceHandler) Update(c *gin.Context) {
 
 	ns, err := h.svc.Update(c.Request.Context(), user, slug, req.DisplayName, req.Description)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -135,7 +135,7 @@ func (h *NamespaceHandler) ListMembers(c *gin.Context) {
 
 	members, err := h.svc.ListMembers(c.Request.Context(), slug)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": members})
@@ -160,7 +160,7 @@ func (h *NamespaceHandler) AddMember(c *gin.Context) {
 	}
 
 	if err := h.svc.AddMember(c.Request.Context(), user, slug, req.Handle, req.Role); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -179,7 +179,7 @@ func (h *NamespaceHandler) RemoveMember(c *gin.Context) {
 	handle := c.Param("handle")
 
 	if err := h.svc.RemoveMember(c.Request.Context(), user, slug, handle); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -204,7 +204,7 @@ func (h *NamespaceHandler) TransferOwnership(c *gin.Context) {
 	}
 
 	if err := h.svc.TransferOwnership(c.Request.Context(), user, slug, req.NewOwner); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -221,7 +221,7 @@ func (h *NamespaceHandler) Leave(c *gin.Context) {
 
 	slug := c.Param("slug")
 	if err := h.svc.Leave(c.Request.Context(), user, slug); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -238,7 +238,7 @@ func (h *NamespaceHandler) Delete(c *gin.Context) {
 
 	slug := c.Param("slug")
 	if err := h.svc.Delete(c.Request.Context(), user, slug); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -266,7 +266,7 @@ func (h *NamespaceHandler) Invite(c *gin.Context) {
 
 	inv, err := h.svc.Invite(c.Request.Context(), user, slug, req.Handle, req.Role, req.Message)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -285,7 +285,7 @@ func (h *NamespaceHandler) ListInvitations(c *gin.Context) {
 	status := c.Query("status")
 	invs, err := h.svc.ListInvitations(c.Request.Context(), user, slug, status)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -308,7 +308,7 @@ func (h *NamespaceHandler) RevokeInvitation(c *gin.Context) {
 	}
 
 	if err := h.svc.RevokeInvitation(c.Request.Context(), user, slug, id); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -325,7 +325,7 @@ func (h *NamespaceHandler) MyInvitations(c *gin.Context) {
 
 	invs, err := h.svc.ListMyInvitations(c.Request.Context(), user)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -356,7 +356,7 @@ func (h *NamespaceHandler) respondInvitation(c *gin.Context, accept bool) {
 	}
 
 	if err := h.svc.RespondToInvitation(c.Request.Context(), user, id, accept); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 

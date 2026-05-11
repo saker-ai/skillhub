@@ -2,19 +2,32 @@ package service
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
-	"github.com/google/uuid"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/repository"
+	"github.com/google/uuid"
 )
 
 type NotificationService struct {
-	repo *repository.NotificationRepo
+	repo   *repository.NotificationRepo
+	logger *slog.Logger
 }
 
 func NewNotificationService(repo *repository.NotificationRepo) *NotificationService {
 	return &NotificationService{repo: repo}
+}
+
+// SetLogger 注入 *slog.Logger。nil 等价于走 slog.Default()。
+func (s *NotificationService) SetLogger(lg *slog.Logger) {
+	s.logger = lg
+}
+
+func (s *NotificationService) loggerOrDefault() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 // Notify creates a notification for a user. Errors are logged but not returned.
@@ -32,7 +45,7 @@ func (s *NotificationService) Notify(ctx context.Context, userID uuid.UUID, cate
 		n.Link = &link
 	}
 	if err := s.repo.Create(ctx, n); err != nil {
-		log.Printf("notification: failed to create for user %s: %v", userID, err)
+		s.loggerOrDefault().Warn("notification: failed to create", "user_id", userID, "err", err)
 	}
 }
 

@@ -13,9 +13,9 @@ import (
 // "latest" resolution. After yank, the skill's latest pointer is repointed
 // to the most recent non-yanked version.
 //
-// Owner or system admin only.
-func (s *SkillService) YankVersion(ctx context.Context, user *model.User, slug, version, reason string) error {
-	skill, ver, err := s.lookupOwnedVersion(ctx, user, slug, version)
+// 写权限：tokenNS 非 nil ⇒ 必须 skill 隶属同 namespace；nil ⇒ owner 或系统 admin。
+func (s *SkillService) YankVersion(ctx context.Context, user *model.User, slug, version, reason string, tokenNS *uuid.UUID) error {
+	skill, ver, err := s.lookupOwnedVersion(ctx, user, slug, version, tokenNS)
 	if err != nil {
 		return err
 	}
@@ -35,9 +35,9 @@ func (s *SkillService) YankVersion(ctx context.Context, user *model.User, slug, 
 }
 
 // UnyankVersion clears the yank flag, making the version eligible for latest
-// resolution again. Owner or system admin only.
-func (s *SkillService) UnyankVersion(ctx context.Context, user *model.User, slug, version string) error {
-	skill, ver, err := s.lookupOwnedVersion(ctx, user, slug, version)
+// resolution again. tokenNS 语义同 YankVersion。
+func (s *SkillService) UnyankVersion(ctx context.Context, user *model.User, slug, version string, tokenNS *uuid.UUID) error {
+	skill, ver, err := s.lookupOwnedVersion(ctx, user, slug, version, tokenNS)
 	if err != nil {
 		return err
 	}
@@ -59,8 +59,8 @@ func (s *SkillService) UnyankVersion(ctx context.Context, user *model.User, slug
 
 // DeprecateVersion attaches a deprecation notice. The version still resolves
 // as latest if it would otherwise — deprecation is advisory, not exclusion.
-func (s *SkillService) DeprecateVersion(ctx context.Context, user *model.User, slug, version, message string) error {
-	_, ver, err := s.lookupOwnedVersion(ctx, user, slug, version)
+func (s *SkillService) DeprecateVersion(ctx context.Context, user *model.User, slug, version, message string, tokenNS *uuid.UUID) error {
+	_, ver, err := s.lookupOwnedVersion(ctx, user, slug, version, tokenNS)
 	if err != nil {
 		return err
 	}
@@ -74,8 +74,8 @@ func (s *SkillService) DeprecateVersion(ctx context.Context, user *model.User, s
 }
 
 // UndeprecateVersion clears the deprecation notice.
-func (s *SkillService) UndeprecateVersion(ctx context.Context, user *model.User, slug, version string) error {
-	_, ver, err := s.lookupOwnedVersion(ctx, user, slug, version)
+func (s *SkillService) UndeprecateVersion(ctx context.Context, user *model.User, slug, version string, tokenNS *uuid.UUID) error {
+	_, ver, err := s.lookupOwnedVersion(ctx, user, slug, version, tokenNS)
 	if err != nil {
 		return err
 	}
@@ -91,15 +91,15 @@ func (s *SkillService) UndeprecateVersion(ctx context.Context, user *model.User,
 	return nil
 }
 
-// lookupOwnedVersion resolves slug+version and verifies the actor owns the
-// skill (or is a system admin).
-func (s *SkillService) lookupOwnedVersion(ctx context.Context, user *model.User, slug, version string) (*model.SkillWithOwner, *model.SkillVersion, error) {
+// lookupOwnedVersion resolves slug+version and verifies the actor may write,
+// taking into account both legacy ownership and team-token namespace scoping.
+func (s *SkillService) lookupOwnedVersion(ctx context.Context, user *model.User, slug, version string, tokenNS *uuid.UUID) (*model.SkillWithOwner, *model.SkillVersion, error) {
 	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
 	if err != nil || skill == nil {
 		return nil, nil, fmt.Errorf("skill not found")
 	}
-	if skill.OwnerID != user.ID && !user.IsAdmin() {
-		return nil, nil, fmt.Errorf("forbidden")
+	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
+		return nil, nil, err
 	}
 	ver, err := s.versionRepo.GetBySkillAndVersion(ctx, skill.ID, version)
 	if err != nil || ver == nil {

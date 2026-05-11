@@ -1,4 +1,14 @@
-package store
+// Package oss 是 SkillHub 的阿里云 OSS backend 子包。
+//
+// 通过 init() 自注册到 store 驱动表，调用方只需 blank import：
+//
+//	import _ "github.com/cinience/skillhub/pkg/store/oss"
+//
+// 即可让 cfg.Store.Backend == "oss" 自动解析到本 backend。
+//
+// 嵌入方如果不需要 OSS，可跳过 blank import 以减小二进制大小
+// （不会链接 alibabacloud-oss-go-sdk-v2）。
+package oss
 
 import (
 	"archive/zip"
@@ -7,35 +17,43 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/cinience/skillhub/pkg/config"
 	"github.com/cinience/skillhub/pkg/semver"
+	"github.com/cinience/skillhub/pkg/store"
 
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 	osscredentials "github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 )
 
-// OSSConfig holds configuration for the Alibaba Cloud OSS storage backend.
-type OSSConfig struct {
-	Bucket    string `yaml:"bucket"`
-	Region    string `yaml:"region"`   // e.g. "cn-hangzhou"
-	Prefix    string `yaml:"prefix"`   // object key prefix, default "skills"
-	Endpoint  string `yaml:"endpoint"` // e.g. "oss-cn-hangzhou.aliyuncs.com"
-	AccessKey string `yaml:"access_key"`
-	SecretKey string `yaml:"secret_key"`
+func init() {
+	store.Register("oss", openOSS)
 }
 
-// OSSBackend implements Store using Alibaba Cloud OSS.
-type OSSBackend struct {
+// openOSS 是 store.Factory 实现：从 OpenContext 取出 cfg.OSS 子树并构造 Backend。
+func openOSS(oc store.OpenContext) (store.Store, error) {
+	return New(oc.Cfg.OSS)
+}
+
+// Config 是 OSS backend 的旧版直构造配置。
+//
+// 与 config.StoreOSSConfig 等价，保留 alias 仅为命名习惯。
+type Config = config.StoreOSSConfig
+
+// Backend implements store.Store using Alibaba Cloud OSS.
+type Backend struct {
 	client *oss.Client
 	bucket string
 	prefix string
 }
 
-func NewOSSBackend(cfg OSSConfig) (*OSSBackend, error) {
+// New 是直接构造入口（不经过 driver registry）。
+// 推荐路径仍是 store.Open("oss", ...)。
+func New(cfg Config) (*Backend, error) {
 	ossCfg := oss.LoadDefaultConfig().
 		WithRegion(cfg.Region)
 
@@ -55,27 +73,27 @@ func NewOSSBackend(cfg OSSConfig) (*OSSBackend, error) {
 		prefix = "skills"
 	}
 
-	return &OSSBackend{
+	return &Backend{
 		client: client,
 		bucket: cfg.Bucket,
 		prefix: prefix,
 	}, nil
 }
 
-func (b *OSSBackend) key(owner, slug, version, filePath string) string {
-	filePath = sanitizeStorePath(filePath)
+func (b *Backend) key(owner, slug, version, filePath string) string {
+	filePath = store.SanitizeStorePath(filePath)
 	return fmt.Sprintf("%s/%s/%s/versions/%s/files/%s", b.prefix, owner, slug, version, filePath)
 }
 
-func (b *OSSBackend) metaKey(owner, slug, version string) string {
+func (b *Backend) metaKey(owner, slug, version string) string {
 	return fmt.Sprintf("%s/%s/%s/versions/%s/meta.json", b.prefix, owner, slug, version)
 }
 
-func (b *OSSBackend) versionPrefix(owner, slug string) string {
+func (b *Backend) versionPrefix(owner, slug string) string {
 	return fmt.Sprintf("%s/%s/%s/versions/", b.prefix, owner, slug)
 }
 
-func (b *OSSBackend) Publish(ctx context.Context, opts PublishOpts) (string, error) {
+func (b *Backend) Publish(ctx context.Context, opts store.PublishOpts) (string, error) {
 	// Upload each file
 	for filePath, content := range opts.Files {
 		key := b.key(opts.Owner, opts.Slug, opts.Version, filePath)
@@ -90,7 +108,7 @@ func (b *OSSBackend) Publish(ctx context.Context, opts PublishOpts) (string, err
 	}
 
 	// Write version metadata
-	meta := publishMeta{
+	meta := store.PublishMeta{
 		Version:   opts.Version,
 		Author:    opts.Author,
 		Email:     opts.Email,
@@ -112,7 +130,7 @@ func (b *OSSBackend) Publish(ctx context.Context, opts PublishOpts) (string, err
 	return fmt.Sprintf("oss://%s/%s", b.bucket, metaKey), nil
 }
 
-func (b *OSSBackend) Archive(owner, slug, version string) (io.ReadCloser, error) {
+func (b *Backend) Archive(owner, slug, version string) (io.ReadCloser, error) {
 	ctx := context.Background()
 	prefix := b.key(owner, slug, version, "")
 
@@ -173,7 +191,7 @@ func (b *OSSBackend) Archive(owner, slug, version string) (io.ReadCloser, error)
 	return io.NopCloser(bytes.NewReader(buf.Bytes())), nil
 }
 
-func (b *OSSBackend) GetFile(owner, slug, version, path string) ([]byte, error) {
+func (b *Backend) GetFile(owner, slug, version, path string) ([]byte, error) {
 	ctx := context.Background()
 	key := b.key(owner, slug, version, path)
 
@@ -189,7 +207,7 @@ func (b *OSSBackend) GetFile(owner, slug, version, path string) ([]byte, error) 
 	return io.ReadAll(io.LimitReader(out.Body, 10<<20)) // 10MB limit
 }
 
-func (b *OSSBackend) ListVersions(owner, slug string) ([]string, error) {
+func (b *Backend) ListVersions(owner, slug string) ([]string, error) {
 	ctx := context.Background()
 	prefix := b.versionPrefix(owner, slug)
 	delimiter := "/"
@@ -228,7 +246,7 @@ func (b *OSSBackend) ListVersions(owner, slug string) ([]string, error) {
 	return versions, nil
 }
 
-func (b *OSSBackend) Exists(owner, slug string) bool {
+func (b *Backend) Exists(owner, slug string) bool {
 	ctx := context.Background()
 	prefix := b.versionPrefix(owner, slug)
 	maxKeys := int32(1)
@@ -244,7 +262,7 @@ func (b *OSSBackend) Exists(owner, slug string) bool {
 	return len(out.Contents) > 0
 }
 
-func (b *OSSBackend) Rename(owner, oldSlug, newSlug string) error {
+func (b *Backend) Rename(owner, oldSlug, newSlug string) error {
 	ctx := context.Background()
 	oldPrefix := fmt.Sprintf("%s/%s/%s/", b.prefix, owner, oldSlug)
 	newPrefix := fmt.Sprintf("%s/%s/%s/", b.prefix, owner, newSlug)
@@ -290,7 +308,7 @@ func (b *OSSBackend) Rename(owner, oldSlug, newSlug string) error {
 			Bucket: &b.bucket,
 			Key:    &k,
 		}); err != nil {
-			log.Printf("warning: failed to delete old key %s during rename: %v", key, err)
+			slog.Default().Warn("failed to delete old key during rename", "key", key, "err", err)
 		}
 	}
 

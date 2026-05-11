@@ -14,12 +14,16 @@ function stripFrontmatter(text: string): string {
   return match ? text.slice(match[0].length) : text;
 }
 
+type DocTab = 'readme' | 'skill';
+
 export default function SkillDetail() {
   const { t } = useTranslation();
   const { slug } = useParams<{ slug: string }>();
   const [skill, setSkill] = useState<Skill | null>(null);
   const [versions, setVersions] = useState<SkillVersion[]>([]);
-  const [mdHtml, setMdHtml] = useState('');
+  const [skillMd, setSkillMd] = useState('');
+  const [readmeMd, setReadmeMd] = useState('');
+  const [activeTab, setActiveTab] = useState<DocTab>('skill');
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
@@ -30,14 +34,23 @@ export default function SkillDetail() {
     getVersions(slug)
       .then(r => setVersions(r.versions ?? []))
       .catch(e => console.error('Failed to load skill data:', e));
-    // Load SKILL.md content
+
+    // Fetch SKILL.md (the canonical spec, frontmatter stripped) and
+    // README.md (free-form long-form docs) in parallel. README wins as
+    // the default tab when present — it is the human-facing landing page.
     getFile(slug, 'latest', 'SKILL.md')
       .then(async res => {
         if (!res.ok) return;
-        const text = await res.text();
-        setMdHtml(stripFrontmatter(text));
+        setSkillMd(stripFrontmatter(await res.text()));
       })
-      .catch(e => console.error('Failed to load skill data:', e));
+      .catch(e => console.error('Failed to load SKILL.md:', e));
+    getFile(slug, 'latest', 'README.md')
+      .then(async res => {
+        if (!res.ok) return;
+        setReadmeMd(await res.text());
+        setActiveTab('readme');
+      })
+      .catch(() => { /* README.md is optional */ });
   }, [slug]);
 
   if (notFound) {
@@ -91,13 +104,61 @@ export default function SkillDetail() {
 
         <div className="detail-layout">
           <div>
-            {mdHtml ? (
-              <div className="markdown-body" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(mdHtml) as string) }} />
-            ) : (
-              <div style={{ color: 'var(--text-muted)', padding: '40px 0', textAlign: 'center' }}>
-                {t('detail.no_content')}
+            {(skillMd || readmeMd) && (
+              <div className="doc-tabs" style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+                {readmeMd && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('readme')}
+                    className={activeTab === 'readme' ? 'doc-tab active' : 'doc-tab'}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '10px 14px',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      color: activeTab === 'readme' ? 'var(--accent)' : 'var(--text-secondary)',
+                      borderBottom: activeTab === 'readme' ? '2px solid var(--accent)' : '2px solid transparent',
+                      marginBottom: '-1px',
+                    }}
+                  >
+                    {t('detail.tab_readme')}
+                  </button>
+                )}
+                {skillMd && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('skill')}
+                    className={activeTab === 'skill' ? 'doc-tab active' : 'doc-tab'}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '10px 14px',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      color: activeTab === 'skill' ? 'var(--accent)' : 'var(--text-secondary)',
+                      borderBottom: activeTab === 'skill' ? '2px solid var(--accent)' : '2px solid transparent',
+                      marginBottom: '-1px',
+                    }}
+                  >
+                    {t('detail.tab_skill_md')}
+                  </button>
+                )}
               </div>
             )}
+            {(() => {
+              const body = activeTab === 'readme' ? readmeMd : skillMd;
+              if (!body) {
+                return (
+                  <div style={{ color: 'var(--text-muted)', padding: '40px 0', textAlign: 'center' }}>
+                    {t('detail.no_content')}
+                  </div>
+                );
+              }
+              return (
+                <div className="markdown-body" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(body) as string) }} />
+              );
+            })()}
           </div>
 
           <div>
