@@ -361,9 +361,9 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 	filesJSON, _ := json.Marshal(filesMeta)
 
 	// Extract parsed info from SKILL.md if present
-	parsedJSON := json.RawMessage("{}")
+	parsedJSON := model.JSONRaw("{}")
 	if content, ok := req.Files["SKILL.md"]; ok {
-		parsedJSON = extractFrontmatter(content)
+		parsedJSON = model.JSONRaw(extractFrontmatter(content))
 	}
 
 	// Publish to git
@@ -382,10 +382,10 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 	}
 
 	// Serialize dependencies (default to empty array)
-	depsJSON := json.RawMessage("[]")
+	depsJSON := model.JSONRaw("[]")
 	if len(req.Dependencies) > 0 {
 		if encoded, err := json.Marshal(req.Dependencies); err == nil {
-			depsJSON = encoded
+			depsJSON = model.JSONRaw(encoded)
 		}
 	}
 
