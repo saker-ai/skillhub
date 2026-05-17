@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/cinience/skillhub/pkg/gitstore"
 	"github.com/cinience/skillhub/pkg/store"
@@ -71,4 +72,12 @@ func (g *Backend) Exists(owner, slug string) bool {
 
 func (g *Backend) Rename(owner, oldSlug, newSlug string) error {
 	return g.gs.Rename(owner, oldSlug, newSlug)
+}
+
+func (g *Backend) Delete(owner, slug string) error {
+	repoPath := g.gs.RepoPath(owner, slug)
+	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+		return nil
+	}
+	return os.RemoveAll(repoPath)
 }

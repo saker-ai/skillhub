@@ -274,6 +274,10 @@ func (b *Backend) Exists(owner, slug string) bool {
 	return len(out.Contents) > 0
 }
 
+func (b *Backend) Delete(owner, slug string) error {
+	return nil // TODO: implement S3 object deletion
+}
+
 func (b *Backend) Rename(owner, oldSlug, newSlug string) error {
 	ctx := context.Background()
 	oldPrefix := fmt.Sprintf("%s/%s/%s/", b.prefix, owner, oldSlug)

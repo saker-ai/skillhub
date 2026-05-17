@@ -161,6 +161,20 @@ func (h *SkillHandler) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "skill deleted"})
 }
 
+func (h *SkillHandler) Purge(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	slug := c.Param("slug")
+	if err := h.svc.PurgeBySlug(c.Request.Context(), user, slug); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "skill purged"})
+}
+
 // Undelete handles POST /api/v1/skills/:slug/undelete
 func (h *SkillHandler) Undelete(c *gin.Context) {
 	user := middleware.GetUser(c)

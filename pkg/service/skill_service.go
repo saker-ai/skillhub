@@ -834,6 +834,21 @@ func (s *SkillService) SoftDelete(ctx context.Context, user *model.User, slug st
 	return nil
 }
 
+func (s *SkillService) PurgeBySlug(ctx context.Context, user *model.User, slug string) error {
+	if user.Role != "admin" {
+		return fmt.Errorf("admin required")
+	}
+	skill, _ := s.skillRepo.GetBySlugIncludeDeleted(ctx, slug)
+	if skill != nil {
+		_ = s.fileStore.Delete(skill.OwnerHandle, slug)
+	}
+	if err := s.skillRepo.HardDeleteBySlug(ctx, slug); err != nil {
+		return err
+	}
+	s.skillRepo.InvalidateCache(slug)
+	return nil
+}
+
 // Undelete restores a soft-deleted skill. tokenNS 语义同 SoftDelete。
 func (s *SkillService) Undelete(ctx context.Context, user *model.User, slug string, tokenNS *uuid.UUID) error {
 	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
