@@ -1,4 +1,4 @@
-const BASE = '/api/v1';
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api/v1';
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {};

@@ -178,7 +178,7 @@ export default function Publish() {
     files.forEach(f => formData.append('files', f.file, f.path));
 
     try {
-      const data = await uploadWithProgress('/api/v1/skills', formData, p => setProgress(p));
+      const data = await uploadWithProgress(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/v1/skills`, formData, p => setProgress(p));
       setStatus('');
       setProgress(100);
       setResult({
@@ -213,7 +213,7 @@ export default function Publish() {
     );
   }
 
-  const baseURL = window.location.origin;
+  const baseURL = window.location.origin + import.meta.env.BASE_URL.replace(/\/$/, '');
   const resultTitle = result ? formatDisplayName(result.displayName, result.slug, 48) : null;
   const availableKinds = isAdmin ? KINDS_ADMIN : KINDS_USER;
 

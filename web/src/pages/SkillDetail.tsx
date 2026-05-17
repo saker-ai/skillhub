@@ -192,7 +192,7 @@ export default function SkillDetail() {
               </div>
               {latestVersion && (
                 <div className="sidebar-section">
-                  <a href={`/api/v1/download?slug=${skill.slug}&version=${latestVersion.version}`} className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
+                  <a href={`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/v1/download?slug=${skill.slug}&version=${latestVersion.version}`} className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
                     &#8615; {t('detail.download_zip')}
                   </a>
                 </div>
