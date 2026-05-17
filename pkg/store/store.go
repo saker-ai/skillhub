@@ -28,6 +28,9 @@ type Store interface {
 
 	// Rename renames skill storage from oldSlug to newSlug.
 	Rename(owner, oldSlug, newSlug string) error
+
+	// Delete removes all storage for a skill (used by admin purge).
+	Delete(owner, slug string) error
 }
 
 // SanitizeStorePath cleans a file path to prevent directory traversal in storage keys.

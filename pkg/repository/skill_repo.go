@@ -294,6 +294,27 @@ func (r *SkillRepo) SoftDelete(ctx context.Context, skillID uuid.UUID) error {
 		}).Error
 }
 
+func (r *SkillRepo) GetBySlugIncludeDeleted(ctx context.Context, slug string) (*model.SkillWithOwner, error) {
+	var skill model.SkillWithOwner
+	err := r.db.WithContext(ctx).
+		Table("skills").
+		Select("skills.*, users.handle AS owner_handle").
+		Joins("JOIN users ON skills.owner_id = users.id").
+		Where("skills.slug = ?", slug).
+		First(&skill).Error
+	if err != nil {
+		return nil, err
+	}
+	return &skill, nil
+}
+
+func (r *SkillRepo) HardDeleteBySlug(ctx context.Context, slug string) error {
+	return r.db.WithContext(ctx).
+		Unscoped().
+		Where("slug = ?", slug).
+		Delete(&model.Skill{}).Error
+}
+
 func (r *SkillRepo) Undelete(ctx context.Context, skillID uuid.UUID) error {
 	return r.db.WithContext(ctx).
 		Model(&model.Skill{}).
