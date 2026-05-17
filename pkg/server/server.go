@@ -331,7 +331,12 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 //	myEngine.Run(...)                   // 由宿主自己监听
 func (s *Server) Run() error {
 	engine := s.NewDefaultEngine()
-	s.RegisterRoutes(engine)
+
+	var routeRoot gin.IRouter = engine
+	if bp := s.cfg.Server.BasePath; bp != "" {
+		routeRoot = engine.Group(bp)
+	}
+	s.RegisterRoutes(routeRoot)
 	s.RegisterStatic(engine)
 
 	addr := fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)

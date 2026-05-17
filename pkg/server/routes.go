@@ -140,6 +140,7 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		authed.GET("/whoami", s.h.auth.WhoAmI)
 		authed.POST("/skills", s.h.skill.Publish)
 		authed.DELETE("/skills/:slug", s.h.skill.Delete)
+		authed.DELETE("/skills/:slug/purge", s.h.skill.Purge)
 		authed.POST("/skills/:slug/undelete", s.h.skill.Undelete)
 		authed.POST("/skills/:slug/request-public", s.h.skill.RequestPublic)
 		authed.POST("/skills/:slug/versions/:version/yank", s.h.skill.YankVersion)
@@ -217,30 +218,26 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 //
 // 注意：NoRoute 只能在 *gin.Engine 上注册一次；多次调用会以最后一次为准（gin 行为）。
 func (s *Server) RegisterStatic(engine *gin.Engine) {
-	// Serve embedded frontend static assets (Vite-bundled JS/CSS under /assets/*)
-	staticFS, _ := fs.Sub(web.StaticFS, "static/assets")
-	engine.StaticFS("/assets", http.FS(staticFS))
+	bp := s.cfg.Server.BasePath // "" or e.g. "/skillhub"
 
-	// Vendored Swagger UI 资源 —— web/ 的 npm "prebuild" 钩子从
-	// node_modules/swagger-ui-dist/ 拷贝 swagger-ui.css / swagger-ui-bundle.js
-	// 到 web/public/swagger/，Vite build 时把整个 public/ 复制到 web/static/，
-	// 最终被 //go:embed all:static 打进二进制。
-	//
-	// 路由必须显式挂载：默认 NoRoute 兜底会把 /swagger/* 当成 SPA 路径返回 index.html，
-	// 浏览器拿到 HTML 当 CSS/JS 解析就会满屏报错。
+	staticFS, _ := fs.Sub(web.StaticFS, "static/assets")
+	engine.StaticFS(bp+"/assets", http.FS(staticFS))
+
 	if swaggerFS, err := fs.Sub(web.StaticFS, "static/swagger"); err == nil {
-		engine.StaticFS("/swagger", http.FS(swaggerFS))
+		engine.StaticFS(bp+"/swagger", http.FS(swaggerFS))
 	}
 
-	// /swagger-init.js 是手写的 Swagger UI 初始化脚本（外置以满足严格 CSP，
-	// 详见 pkg/handler/openapi_handler.go 的 swaggerUIHTML）。源文件在
-	// web/public/swagger-init.js，Vite 原样拷贝到 web/static/ 根目录。
-	engine.StaticFileFS("/swagger-init.js", "static/swagger-init.js", http.FS(web.StaticFS))
+	engine.StaticFileFS(bp+"/swagger-init.js", "static/swagger-init.js", http.FS(web.StaticFS))
 
-	// SPA fallback: serve index.html for all non-API routes
 	indexHTML, _ := web.StaticFS.ReadFile("static/index.html")
+	apiPrefix := bp + "/api/"
 	engine.NoRoute(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, apiPrefix) {
+			c.JSON(404, gin.H{"error": "not found"})
+			return
+		}
+		if bp != "" && !strings.HasPrefix(path, bp+"/") && path != bp {
 			c.JSON(404, gin.H{"error": "not found"})
 			return
 		}

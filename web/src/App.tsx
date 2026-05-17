@@ -12,6 +12,8 @@ import Login from './pages/Login';
 import Namespaces from './pages/Namespaces';
 import NamespaceDetail from './pages/NamespaceDetail';
 
+const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/';
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -27,7 +29,7 @@ export default function App() {
 
   return (
     <AuthContext.Provider value={{ user, loading, refresh }}>
-      <BrowserRouter>
+      <BrowserRouter basename={basename}>
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<Home />} />

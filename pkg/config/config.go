@@ -22,9 +22,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port    int    `yaml:"port"`
-	Host    string `yaml:"host"`
-	BaseURL string `yaml:"base_url"`
+	Port     int    `yaml:"port"`
+	Host     string `yaml:"host"`
+	BaseURL  string `yaml:"base_url"`
+	BasePath string `yaml:"base_path"`
 }
 
 type DatabaseConfig struct {
@@ -201,6 +202,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SKILLHUB_BASE_URL"); v != "" {
 		cfg.Server.BaseURL = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("SKILLHUB_BASE_PATH"); v != "" {
+		cfg.Server.BasePath = "/" + strings.Trim(v, "/")
 	}
 	if v := os.Getenv("SKILLHUB_DB_DRIVER"); v != "" {
 		cfg.Database.Driver = v
