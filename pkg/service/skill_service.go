@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"mime/multipart"
+	"net/textproto"
 	"path"
 	"regexp"
 	"sort"
@@ -336,11 +338,14 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 	var filesMeta []model.VersionFile
 	var hashParts []string
 	for path, content := range req.Files {
+		slog.Debug("PublishVersion: processing file", "path", path, "content_len", len(content))
 		cleanPath := sanitizeFilePath(path)
+		slog.Debug("PublishVersion: after sanitize", "original", path, "clean", cleanPath)
 		if cleanPath == "" {
 			return nil, nil, fmt.Errorf("invalid file path: %s", path)
 		}
 		if cleanPath != path {
+			slog.Debug("PublishVersion: path changed after sanitize", "before", path, "after", cleanPath)
 			req.Files[cleanPath] = content
 			delete(req.Files, path)
 			path = cleanPath
@@ -909,6 +914,8 @@ const (
 )
 
 // ReadMultipartFiles reads all files from a multipart form.
+// NOTE: header.Filename is stripped of directory by Go's standard library (RFC 7578 §4.2),
+// so we read the raw Content-Disposition header directly to preserve subdirectory paths.
 func ReadMultipartFiles(form *multipart.Form) (map[string][]byte, error) {
 	files := make(map[string][]byte)
 	for _, headers := range form.File {
@@ -919,8 +926,16 @@ func ReadMultipartFiles(form *multipart.Form) (map[string][]byte, error) {
 			if header.Size > maxFileSize {
 				return nil, fmt.Errorf("file %s exceeds max size (%d bytes)", header.Filename, maxFileSize)
 			}
-			name := sanitizeFilePath(header.Filename)
+
+			// Extract filename from raw Content-Disposition to preserve directory structure
+			filename := filenameFromHeader(header.Header)
+			slog.Debug("ReadMultipartFiles: raw Content-Disposition filename",
+				"full_path", filename, "stripped", header.Filename)
+
+			name := sanitizeFilePath(filename)
+			slog.Debug("ReadMultipartFiles: after sanitizeFilePath", "input", filename, "output", name)
 			if name == "" {
+				slog.Warn("ReadMultipartFiles: file skipped (empty name after sanitize)", "raw_filename", filename)
 				continue
 			}
 			f, err := header.Open()
@@ -938,17 +953,48 @@ func ReadMultipartFiles(form *multipart.Form) (map[string][]byte, error) {
 			files[name] = data
 		}
 	}
+	slog.Debug("ReadMultipartFiles: complete", "file_count", len(files), "keys", keysOf(files))
 	return files, nil
+}
+
+// filenameFromHeader extracts the filename from the raw Content-Disposition header,
+// preserving subdirectory paths that Go's standard library strips.
+func filenameFromHeader(h textproto.MIMEHeader) string {
+	raw := h.Get("Content-Disposition")
+	slog.Debug("filenameFromHeader: raw Content-Disposition", "header", raw)
+	_, params, err := mime.ParseMediaType(raw)
+	if err != nil {
+		slog.Warn("filenameFromHeader: parse error", "error", err, "header", raw)
+		return ""
+	}
+	filename := params["filename"]
+	slog.Debug("filenameFromHeader: parsed filename", "filename", filename)
+	return filename
 }
 
 // sanitizeFilePath cleans a user-supplied file path, rejecting traversal attempts.
 func sanitizeFilePath(name string) string {
+	slog.Debug("sanitizeFilePath: input", "name", name)
+	if strings.HasPrefix(name, "/") {
+		slog.Warn("sanitizeFilePath: absolute path rejected", "name", name)
+		return ""
+	}
 	name = path.Clean(name)
 	name = strings.TrimPrefix(name, "/")
 	if name == "." || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
+		slog.Warn("sanitizeFilePath: path traversal rejected", "name", name)
 		return ""
 	}
+	slog.Debug("sanitizeFilePath: output", "name", name)
 	return name
+}
+
+func keysOf(m map[string][]byte) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func derefStr(s *string) string {
