@@ -59,6 +59,7 @@ func buildMapping() mapping.IndexMapping {
 
 	// Filterable keyword fields
 	skillMapping.AddFieldMappingsAt("category", keywordField)
+	skillMapping.AddFieldMappingsAt("docType", keywordField)
 	skillMapping.AddFieldMappingsAt("visibility", keywordField)
 	skillMapping.AddFieldMappingsAt("moderationStatus", keywordField)
 	skillMapping.AddFieldMappingsAt("ownerHandleExact", keywordField)
@@ -107,6 +108,37 @@ func (c *Client) IndexSkill(ctx context.Context, doc *SkillDocument) error {
 // DeleteSkill removes a skill from the search index.
 func (c *Client) DeleteSkill(ctx context.Context, id string) error {
 	return c.index.Delete(id)
+}
+
+type PluginDocument struct {
+	ID               string   `json:"id"`
+	Slug             string   `json:"slug"`
+	DisplayName      string   `json:"displayName"`
+	Summary          string   `json:"summary"`
+	DocType          string   `json:"docType"`
+	Category         string   `json:"category"`
+	Tags             []string `json:"tags"`
+	OwnerHandle      string   `json:"ownerHandle"`
+	OwnerHandleExact string   `json:"ownerHandleExact"`
+	Visibility       string   `json:"visibility"`
+	ModerationStatus string   `json:"moderationStatus"`
+	IsDeleted        bool     `json:"isDeleted"`
+	Downloads        int64    `json:"downloads"`
+	Stars            int      `json:"stars"`
+	UpdatedAt        int64    `json:"updatedAt"`
+	CreatedAt        int64    `json:"createdAt"`
+}
+
+func (c *Client) IndexPlugin(ctx context.Context, doc *PluginDocument) error {
+	doc.OwnerHandleExact = doc.OwnerHandle
+	if doc.DocType == "" {
+		doc.DocType = "plugin"
+	}
+	return c.index.Index("plugin_"+doc.ID, doc)
+}
+
+func (c *Client) DeletePlugin(ctx context.Context, id string) error {
+	return c.index.Delete("plugin_" + id)
 }
 
 type SearchResult struct {

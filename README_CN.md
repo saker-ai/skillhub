@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/cinience/skillhub)](https://goreportcard.com/report/github.com/cinience/skillhub)
 
-自托管的 Agent 技能注册中心，用于发布、版本管理与分发 agent 技能。支持 Web UI、REST API 和 CLI 客户端，兼容 [ClawHub](https://github.com/openclaw/clawhub) 协议。适合企业内部构建自己的 agent 技能注册中心。
+自托管的 Agent 技能与插件注册中心，用于发布、版本管理与分发 agent 技能和插件 bundle。支持 Web UI、REST API 和 CLI 客户端，兼容 [ClawHub](https://github.com/openclaw/clawhub) 协议。适合企业内部构建自己的 agent 技能和插件注册中心。
 
 [English](README.md) | [中文](README_CN.md)
 
@@ -100,6 +100,80 @@ skillhub admin set-password --user alice --password newpass
 ```
 
 技能默认安装到 `~/.skillhub/skills/`，可通过 `~/.skillhub/config.yaml` 中的 `skills_dir` 自定义。
+
+## 插件 (Plugins)
+
+Plugin 将多个 skill、MCP server 和 hook 打包为单一可部署单元。SkillHub 同时作为插件注册中心 — 一次发布，随处加载。
+
+### 插件清单 (`plugin.json`)
+
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "生产力工具插件包",
+  "skills": ["skills/"],
+  "mcp_servers": {
+    "code-tools": {
+      "type": "sse",
+      "url": "http://localhost:9090/sse",
+      "timeout_seconds": 30
+    }
+  },
+  "hooks": {
+    "pre_tool_use": [
+      {"matcher": "bash", "hooks": [{"command": "echo pre-check"}]}
+    ]
+  }
+}
+```
+
+### 发布插件
+
+```bash
+skillhub plugin publish ./my-plugin \
+  --slug my-plugin --version 1.0.0 \
+  --summary "生产力工具包"
+```
+
+### 插件 API
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/v1/plugins` | 发布插件（multipart: plugin.json + 文件） |
+| `GET` | `/api/v1/plugins` | 列出所有插件 |
+| `GET` | `/api/v1/plugins/:slug` | 获取插件元信息 |
+| `GET` | `/api/v1/plugins/:slug/versions` | 列出插件版本 |
+| `GET` | `/api/v1/plugins/:slug/file?version=X&path=Y` | 获取插件中的文件 |
+| `GET` | `/api/v1/plugins/:slug/download?version=X` | 下载插件包 |
+
+### 在 Saker 中加载插件
+
+**全局加载（运行时启动时）：**
+```go
+api.Options{
+    RemotePluginSources: []plugin.RemotePluginSource{{
+        Registry: "http://skillhub:10070",
+        Slugs:    []string{"my-plugin"},
+    }},
+}
+```
+
+**Session 级别加载（通过 API 按请求）：**
+```json
+{
+  "extra_body": {
+    "plugin_uri": "plugin://skillhub:10070?slugs=my-plugin"
+  }
+}
+```
+
+加载后插件的组件被分解注入：
+- **Skills** → 注册到 session skill 注册表
+- **MCP Servers** → 建立连接并注册为可用工具
+- **Hooks** → 在 run 生命周期内与全局 hooks 并行执行
+
+Session 加载的插件按 thread 缓存（TTL 10 分钟），支持跨 turn 复用。
 
 ## 架构
 
@@ -224,6 +298,17 @@ skills_dir: ~/.skillhub/skills   # 技能安装目录（可选）
 | `POST` | `/api/v1/tokens` | 创建 API Token |
 | `POST` | `/api/v1/users/ban` | 封禁/解封用户 |
 | `POST` | `/api/v1/users/role` | 设置用户角色 |
+
+### 插件接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/v1/plugins` | 发布插件 |
+| `GET` | `/api/v1/plugins` | 列出所有插件 |
+| `GET` | `/api/v1/plugins/:slug` | 获取插件元信息 |
+| `GET` | `/api/v1/plugins/:slug/versions` | 列出版本 |
+| `GET` | `/api/v1/plugins/:slug/file` | 获取插件文件内容 |
+| `GET` | `/api/v1/plugins/:slug/download` | 下载插件包 |
 
 ### Webhook 接口
 

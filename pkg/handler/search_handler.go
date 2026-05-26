@@ -56,6 +56,9 @@ func (h *SearchHandler) Search(c *gin.Context) {
 	}
 
 	filters := "visibility = public AND moderationStatus = approved AND isDeleted = false"
+	if docType := c.Query("type"); docType == "skill" || docType == "plugin" {
+		filters += " AND docType = " + docType
+	}
 
 	result, err := h.searchClient.Search(c.Request.Context(), query, limit, offset, sortFields, filters)
 	if err != nil {

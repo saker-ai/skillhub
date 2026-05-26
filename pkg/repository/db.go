@@ -109,6 +109,8 @@ func NewDBWithOptions(cfg config.DatabaseConfig, opts DBOptions) (*gorm.DB, erro
 		&model.OAuthIdentity{},
 		&model.Notification{},
 		&model.Rating{},
+		&model.Plugin{},
+		&model.PluginVersion{},
 	); err != nil {
 		return nil, fmt.Errorf("auto migrate: %w", err)
 	}

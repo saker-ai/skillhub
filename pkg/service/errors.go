@@ -17,3 +17,9 @@ import "errors"
 //
 // 注:errors.Is 沿 wrapped chain 走,所以多层 fmt.Errorf("%w: ..", err) 也能识别。
 var ErrForbidden = errors.New("forbidden")
+
+// ErrValidation indicates a request-level validation failure (HTTP 400).
+var ErrValidation = errors.New("validation")
+
+// ErrConflict indicates a duplicate/conflict state (HTTP 409).
+var ErrConflict = errors.New("conflict")

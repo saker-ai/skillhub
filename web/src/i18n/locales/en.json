@@ -1,6 +1,7 @@
 {
   "nav": {
     "skills": "Skills",
+    "plugins": "Plugins",
     "search": "Search",
     "publish": "Publish",
     "login": "Login",
@@ -54,6 +55,32 @@
     "not_found": "Skill not found",
     "tab_readme": "README",
     "tab_skill_md": "SKILL.md"
+  },
+  "plugins": {
+    "title": "Plugins",
+    "newest": "Newest",
+    "downloads": "Downloads",
+    "stars": "Stars",
+    "name": "Name",
+    "no_plugins": "No plugins found yet.",
+    "be_first": "Be the first to publish one!"
+  },
+  "plugin_detail": {
+    "stars": "Stars",
+    "downloads": "Downloads",
+    "versions": "Versions",
+    "install": "Install",
+    "latest_version": "Latest Version",
+    "published_by": "Published by",
+    "created": "Created",
+    "updated": "Updated",
+    "download_zip": "Download ZIP",
+    "version_history": "Version History",
+    "not_found": "Plugin not found",
+    "no_manifest": "No plugin manifest available.",
+    "skills_included": "Skills Included",
+    "mcp_servers": "MCP Servers",
+    "manifest": "Manifest"
   },
   "search": {
     "placeholder": "Search skills...",

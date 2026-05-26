@@ -121,6 +121,13 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		public.GET("/resolve", s.h.download.Resolve)
 		public.GET("/skills/:slug/ratings", s.h.rating.List)
 		public.GET("/skills/:slug/comments", s.h.comment.List)
+
+		// Plugin endpoints (public read)
+		public.GET("/plugins", s.h.plugin.List)
+		public.GET("/plugins/:slug", s.h.plugin.Get)
+		public.GET("/plugins/:slug/versions", s.h.plugin.Versions)
+		public.GET("/plugins/file", s.h.plugin.GetFile)
+		public.GET("/plugins/download", s.h.plugin.Download)
 	}
 
 	// Download endpoint (with download rate limit)
@@ -179,6 +186,13 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		authed.DELETE("/skills/:slug/ratings", s.h.rating.Delete)
 		authed.POST("/skills/:slug/comments", s.h.comment.Create)
 		authed.DELETE("/comments/:id", s.h.comment.Delete)
+
+		// Plugin publish (authenticated)
+		authed.POST("/plugins", s.h.plugin.Publish)
+		authed.DELETE("/plugins/:slug", s.h.plugin.Delete)
+		authed.POST("/plugins/:slug/undelete", s.h.plugin.Undelete)
+		authed.POST("/plugins/:slug/versions/:version/yank", s.h.plugin.YankVersion)
+		authed.DELETE("/plugins/:slug/versions/:version/yank", s.h.plugin.UnyankVersion)
 	}
 
 	// Admin endpoints
@@ -195,6 +209,9 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		admin.POST("/skills/:slug/review", s.h.admin.ReviewSkill)
 		admin.POST("/skills/:slug/visibility", s.h.admin.SetVisibility)
 		admin.GET("/audit-logs", s.h.audit.List)
+		admin.GET("/plugins", s.h.admin.ListAllPlugins)
+		admin.POST("/plugins/:slug/review", s.h.admin.ReviewPlugin)
+		admin.POST("/plugins/:slug/visibility", s.h.admin.SetPluginVisibility)
 	}
 
 	// Agent auto-provisioning (rate-limited, requires SKILLHUB_AGENT_SECRET)

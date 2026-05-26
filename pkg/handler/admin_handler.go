@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -16,13 +17,14 @@ import (
 var validRoles = []string{"user", "moderator", "admin"}
 
 type AdminHandler struct {
-	userRepo *repository.UserRepo
-	skillSvc *service.SkillService
-	auditSvc *service.AuditService
+	userRepo  *repository.UserRepo
+	skillSvc  *service.SkillService
+	pluginSvc *service.PluginService
+	auditSvc  *service.AuditService
 }
 
-func NewAdminHandler(userRepo *repository.UserRepo, skillSvc *service.SkillService, auditSvc *service.AuditService) *AdminHandler {
-	return &AdminHandler{userRepo: userRepo, skillSvc: skillSvc, auditSvc: auditSvc}
+func NewAdminHandler(userRepo *repository.UserRepo, skillSvc *service.SkillService, pluginSvc *service.PluginService, auditSvc *service.AuditService) *AdminHandler {
+	return &AdminHandler{userRepo: userRepo, skillSvc: skillSvc, pluginSvc: pluginSvc, auditSvc: auditSvc}
 }
 
 // BanUser handles POST /api/v1/users/ban
@@ -229,4 +231,64 @@ func (h *AdminHandler) SetVisibility(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "visibility updated to " + req.Visibility})
+}
+
+func (h *AdminHandler) ListAllPlugins(c *gin.Context) {
+	limit := 20
+	if l := c.Query("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+	cursor := c.Query("cursor")
+	visibility := c.Query("visibility")
+
+	plugins, nextCursor, err := h.pluginSvc.ListAllForAdmin(c.Request.Context(), limit, cursor, visibility)
+	if err != nil {
+		writeInternalError(c, "admin_list_plugins", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data":       plugins,
+		"nextCursor": nextCursor,
+	})
+}
+
+func (h *AdminHandler) ReviewPlugin(c *gin.Context) {
+	slug := c.Param("slug")
+	var req struct {
+		Action string `json:"action"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || (req.Action != "approve" && req.Action != "reject") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "action must be 'approve' or 'reject'"})
+		return
+	}
+	var reviewerID *uuid.UUID
+	if admin := middleware.GetUser(c); admin != nil {
+		reviewerID = &admin.ID
+	}
+	approve := req.Action == "approve"
+	if err := h.pluginSvc.ReviewPlugin(c.Request.Context(), reviewerID, slug, approve); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "plugin " + req.Action + "d"})
+}
+
+func (h *AdminHandler) SetPluginVisibility(c *gin.Context) {
+	slug := c.Param("slug")
+	var req struct {
+		Visibility string `json:"visibility"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "visibility is required"})
+		return
+	}
+	var adminID *uuid.UUID
+	if admin := middleware.GetUser(c); admin != nil {
+		adminID = &admin.ID
+	}
+	if err := h.pluginSvc.SetPluginVisibility(c.Request.Context(), adminID, slug, req.Visibility); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "visibility updated"})
 }

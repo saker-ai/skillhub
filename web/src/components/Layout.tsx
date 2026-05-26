@@ -24,6 +24,7 @@ export default function Layout() {
           </Link>
           <nav className="nav">
             <Link to="/skills">{t('nav.skills')}</Link>
+            <Link to="/plugins">{t('nav.plugins')}</Link>
             <Link to="/publish">{t('nav.publish')}</Link>
             <a href="/api/docs" target="_blank" rel="noopener noreferrer">{t('nav.api')}</a>
             {user && <Link to="/namespaces">{t('nav.namespaces')}</Link>}

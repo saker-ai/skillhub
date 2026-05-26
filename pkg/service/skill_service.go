@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"mime/multipart"
 	"path"
 	"regexp"
@@ -919,7 +920,8 @@ func ReadMultipartFiles(form *multipart.Form) (map[string][]byte, error) {
 			if header.Size > maxFileSize {
 				return nil, fmt.Errorf("file %s exceeds max size (%d bytes)", header.Filename, maxFileSize)
 			}
-			name := sanitizeFilePath(header.Filename)
+			name := multipartFileName(header)
+			name = sanitizeFilePath(name)
 			if name == "" {
 				continue
 			}
@@ -939,6 +941,20 @@ func ReadMultipartFiles(form *multipart.Form) (map[string][]byte, error) {
 		}
 	}
 	return files, nil
+}
+
+// multipartFileName extracts the original filename from a multipart file header.
+// Go 1.22+ applies filepath.Base() to FileHeader.Filename, stripping directory
+// paths. We parse the raw Content-Disposition header to recover the full relative path.
+func multipartFileName(fh *multipart.FileHeader) string {
+	if cd := fh.Header.Get("Content-Disposition"); cd != "" {
+		if _, params, err := mime.ParseMediaType(cd); err == nil {
+			if fn := params["filename"]; fn != "" {
+				return fn
+			}
+		}
+	}
+	return fh.Filename
 }
 
 // sanitizeFilePath cleans a user-supplied file path, rejecting traversal attempts.

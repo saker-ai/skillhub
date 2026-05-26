@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/cinience/skillhub)](https://goreportcard.com/report/github.com/cinience/skillhub)
 
-Self-hosted agent skill registry. Publish, version, and distribute agent skills across your organization — with a Web UI, REST API, and CLI client built on the [ClawHub](https://github.com/openclaw/clawhub) protocol. Ideal for enterprises building their own internal agent skill registry.
+Self-hosted agent skill & plugin registry. Publish, version, and distribute agent skills and plugin bundles across your organization — with a Web UI, REST API, and CLI client built on the [ClawHub](https://github.com/openclaw/clawhub) protocol. Ideal for enterprises building their own internal agent skill and plugin registry.
 
 [English](README.md) | [中文](README_CN.md)
 
@@ -100,6 +100,80 @@ skillhub admin set-password --user alice --password newpass
 ```
 
 Skills are installed to `~/.skillhub/skills/` by default. Customize via `skills_dir` in `~/.skillhub/config.yaml`.
+
+## Plugins
+
+Plugins are bundles that package multiple skills, MCP servers, and hooks into a single deployable unit. SkillHub serves as the plugin registry — publish once, load anywhere.
+
+### Plugin Manifest (`plugin.json`)
+
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "A productivity plugin bundle",
+  "skills": ["skills/"],
+  "mcp_servers": {
+    "code-tools": {
+      "type": "sse",
+      "url": "http://localhost:9090/sse",
+      "timeout_seconds": 30
+    }
+  },
+  "hooks": {
+    "pre_tool_use": [
+      {"matcher": "bash", "hooks": [{"command": "echo pre-check"}]}
+    ]
+  }
+}
+```
+
+### Publishing a Plugin
+
+```bash
+skillhub plugin publish ./my-plugin \
+  --slug my-plugin --version 1.0.0 \
+  --summary "Productivity tools bundle"
+```
+
+### Plugin API
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/plugins` | Publish plugin (multipart: plugin.json + files) |
+| `GET` | `/api/v1/plugins` | List plugins |
+| `GET` | `/api/v1/plugins/:slug` | Get plugin metadata |
+| `GET` | `/api/v1/plugins/:slug/versions` | List plugin versions |
+| `GET` | `/api/v1/plugins/:slug/file?version=X&path=Y` | Get file from plugin |
+| `GET` | `/api/v1/plugins/:slug/download?version=X` | Download plugin package |
+
+### Loading Plugins in Saker
+
+**Global (runtime startup):**
+```go
+api.Options{
+    RemotePluginSources: []plugin.RemotePluginSource{{
+        Registry: "http://skillhub:10070",
+        Slugs:    []string{"my-plugin"},
+    }},
+}
+```
+
+**Session-level (per-request via API):**
+```json
+{
+  "extra_body": {
+    "plugin_uri": "plugin://skillhub:10070?slugs=my-plugin"
+  }
+}
+```
+
+When loaded, a plugin's components are decomposed and injected:
+- **Skills** → registered in the session skill registry
+- **MCP Servers** → connections established and tools registered
+- **Hooks** → executed alongside global hooks for the run's lifetime
+
+Session-loaded plugins are cached per-thread (TTL 10min) for cross-turn reuse.
 
 ## Architecture
 
@@ -224,6 +298,17 @@ skills_dir: ~/.skillhub/skills   # Skill install directory (optional)
 | `POST` | `/api/v1/tokens` | Create API token |
 | `POST` | `/api/v1/users/ban` | Ban/unban user |
 | `POST` | `/api/v1/users/role` | Set user role |
+
+### Plugin API
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/plugins` | Publish a plugin |
+| `GET` | `/api/v1/plugins` | List plugins |
+| `GET` | `/api/v1/plugins/:slug` | Get plugin metadata |
+| `GET` | `/api/v1/plugins/:slug/versions` | List versions |
+| `GET` | `/api/v1/plugins/:slug/file` | Get plugin file content |
+| `GET` | `/api/v1/plugins/:slug/download` | Download plugin package |
 
 ### Webhooks
 

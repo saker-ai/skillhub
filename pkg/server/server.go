@@ -76,6 +76,7 @@ type handlers struct {
 	agent     *handler.AgentHandler
 	webAuth   *handler.WebAuthHandler
 	openapi   *handler.OpenAPIHandler
+	plugin    *handler.PluginHandler
 }
 
 // Server 持有 SkillHub 完整的运行时依赖与 HTTP handler 集合。
@@ -260,6 +261,9 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 	// Rate Limiter
 	rateLimiter := middleware.NewRateLimiter(cfg.RateLimit)
 
+	// Plugin service
+	pluginSvc := service.NewPluginService(db, repository.NewPluginRepo(db), fileStore, searchClient, auditSvc, lg)
+
 	// Handlers — populated into Server.h, consumed by RegisterRoutes.
 	searchHandler := handler.NewSearchHandler(searchClient)
 	searchHandler.SetMetrics(mx)
@@ -269,7 +273,7 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 		download:  handler.NewDownloadHandler(skillSvc),
 		auth:      handler.NewAuthHandler(authSvc, userRepo),
 		star:      handler.NewStarHandler(skillSvc),
-		admin:     handler.NewAdminHandler(userRepo, skillSvc, auditSvc),
+		admin:     handler.NewAdminHandler(userRepo, skillSvc, pluginSvc, auditSvc),
 		audit:     handler.NewAuditHandler(auditSvc),
 		token:     handler.NewTokenHandler(authSvc, tokenRepo, nsSvc),
 		namespace: handler.NewNamespaceHandler(nsSvc),
@@ -283,6 +287,7 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 		agent:     handler.NewAgentHandler(authSvc, userRepo),
 		webAuth:   handler.NewWebAuthHandler(authSvc),
 		openapi:   handler.NewOpenAPIHandler(),
+		plugin:    handler.NewPluginHandler(pluginSvc),
 	}
 
 	// Wire optional dependencies into handlers AFTER the literal — keeps

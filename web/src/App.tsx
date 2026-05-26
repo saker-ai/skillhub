@@ -11,6 +11,8 @@ import Publish from './pages/Publish';
 import Login from './pages/Login';
 import Namespaces from './pages/Namespaces';
 import NamespaceDetail from './pages/NamespaceDetail';
+import Plugins from './pages/Plugins';
+import PluginDetail from './pages/PluginDetail';
 
 const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/';
 
@@ -40,6 +42,8 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/namespaces" element={<Namespaces />} />
             <Route path="/namespaces/:slug" element={<NamespaceDetail />} />
+            <Route path="/plugins" element={<Plugins />} />
+            <Route path="/plugins/:slug" element={<PluginDetail />} />
           </Route>
         </Routes>
       </BrowserRouter>
