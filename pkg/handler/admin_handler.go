@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -235,8 +234,8 @@ func (h *AdminHandler) SetVisibility(c *gin.Context) {
 
 func (h *AdminHandler) ListAllPlugins(c *gin.Context) {
 	limit := 20
-	if l := c.Query("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 100 {
+		limit = l
 	}
 	cursor := c.Query("cursor")
 	visibility := c.Query("visibility")

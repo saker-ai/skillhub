@@ -86,7 +86,8 @@ func (r *PluginRepo) List(ctx context.Context, opts PluginListOptions) ([]model.
 		Select("plugins.*, users.handle as owner_handle, users.avatar_url as owner_avatar_url").
 		Joins("LEFT JOIN users ON users.id = plugins.owner_id").
 		Where("plugins.soft_deleted_at IS NULL").
-		Where("plugins.visibility = 'public'")
+		Where("plugins.visibility = 'public'").
+		Where("plugins.moderation_status = 'approved'")
 
 	if opts.Category != "" {
 		q = q.Where("plugins.category = ?", opts.Category)
@@ -167,6 +168,7 @@ func (r *PluginRepo) ListVersions(ctx context.Context, pluginID uuid.UUID) ([]mo
 	err := r.db.WithContext(ctx).
 		Where("plugin_id = ? AND soft_deleted_at IS NULL", pluginID).
 		Order("created_at DESC").
+		Limit(100).
 		Find(&versions).Error
 	return versions, err
 }

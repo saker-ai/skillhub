@@ -10,7 +10,6 @@ import (
 	"github.com/cinience/skillhub/pkg/repository"
 	"github.com/cinience/skillhub/pkg/service"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 type PluginHandler struct {
@@ -23,8 +22,8 @@ func NewPluginHandler(svc *service.PluginService) *PluginHandler {
 
 // POST /api/v1/plugins
 func (h *PluginHandler) Publish(c *gin.Context) {
-	userID, ok := getUserID(c)
-	if !ok {
+	user := middleware.GetUser(c)
+	if user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
@@ -36,10 +35,10 @@ func (h *PluginHandler) Publish(c *gin.Context) {
 
 	input, err := h.svc.ParseMultipartPublish(c.Request.MultipartForm)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
-	input.OwnerID = userID
+	input.OwnerID = user.ID
 
 	result, err := h.svc.Publish(c.Request.Context(), *input)
 	if err != nil {
@@ -171,21 +170,6 @@ func pluginToJSON(p model.PluginWithOwner) gin.H {
 	}
 
 	return result
-}
-
-func getUserID(c *gin.Context) (uuid.UUID, bool) {
-	val, exists := c.Get("user_id")
-	if !exists {
-		return uuid.UUID{}, false
-	}
-	switch v := val.(type) {
-	case uuid.UUID:
-		return v, true
-	case string:
-		id, err := uuid.Parse(v)
-		return id, err == nil
-	}
-	return uuid.UUID{}, false
 }
 
 func (h *PluginHandler) Delete(c *gin.Context) {

@@ -311,14 +311,22 @@ func (s *PluginService) Download(ctx context.Context, slug, version string) (io.
 			return nil, "", fmt.Errorf("%w: no versions found", ErrNotFound)
 		}
 		version = v.Version
+	} else {
+		ver, err := s.pluginRepo.GetVersion(ctx, p.ID, version)
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: version %s not found", ErrNotFound, version)
+		}
+		if ver.YankedAt != nil {
+			return nil, "", fmt.Errorf("%w: version %s is yanked", ErrValidation, version)
+		}
 	}
-
-	_ = s.pluginRepo.IncrementDownloads(ctx, p.ID)
 
 	reader, err := s.fileStore.Archive("_plugins_", slug, version)
 	if err != nil {
 		return nil, "", fmt.Errorf("build archive: %w", err)
 	}
+
+	_ = s.pluginRepo.IncrementDownloads(ctx, p.ID)
 
 	ver, _ := s.pluginRepo.GetVersion(ctx, p.ID, version)
 	etag := ""
@@ -351,19 +359,11 @@ func (s *PluginService) ParseMultipartPublish(form *multipart.Form) (*PluginPubl
 		input.Tags = strings.Split(tags, ",")
 	}
 
-	input.Files = map[string][]byte{}
-	for _, fh := range form.File["files"] {
-		f, err := fh.Open()
-		if err != nil {
-			return nil, fmt.Errorf("open file %s: %w", fh.Filename, err)
-		}
-		data, err := io.ReadAll(f)
-		f.Close()
-		if err != nil {
-			return nil, fmt.Errorf("read file %s: %w", fh.Filename, err)
-		}
-		input.Files[fh.Filename] = data
+	files, err := ReadMultipartFiles(form)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
+	input.Files = files
 
 	return input, nil
 }
