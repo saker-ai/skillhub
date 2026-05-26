@@ -60,6 +60,7 @@ func (r *PluginRepo) GetWithOwner(ctx context.Context, slug string) (*model.Plug
 
 type PluginListOptions struct {
 	Category string
+	Sort     string
 	Cursor   string
 	Limit    int
 	OwnerID  *uuid.UUID
@@ -68,6 +69,16 @@ type PluginListOptions struct {
 func (r *PluginRepo) List(ctx context.Context, opts PluginListOptions) ([]model.PluginWithOwner, string, error) {
 	if opts.Limit <= 0 || opts.Limit > 100 {
 		opts.Limit = 20
+	}
+
+	orderClause := "plugins.created_at DESC, plugins.id"
+	switch opts.Sort {
+	case "downloads":
+		orderClause = "plugins.downloads DESC, plugins.id"
+	case "stars":
+		orderClause = "plugins.stars_count DESC, plugins.id"
+	case "name":
+		orderClause = "plugins.slug ASC, plugins.id"
 	}
 
 	q := r.db.WithContext(ctx).
@@ -84,10 +95,19 @@ func (r *PluginRepo) List(ctx context.Context, opts PluginListOptions) ([]model.
 		q = q.Where("plugins.owner_id = ?", *opts.OwnerID)
 	}
 	if opts.Cursor != "" {
-		q = q.Where("plugins.id > ?", opts.Cursor)
+		switch opts.Sort {
+		case "downloads":
+			q = q.Where("(plugins.downloads, plugins.id) < (SELECT downloads, id FROM plugins WHERE id = ?)", opts.Cursor)
+		case "stars":
+			q = q.Where("(plugins.stars_count, plugins.id) < (SELECT stars_count, id FROM plugins WHERE id = ?)", opts.Cursor)
+		case "name":
+			q = q.Where("(plugins.slug, plugins.id) > (SELECT slug, id FROM plugins WHERE id = ?)", opts.Cursor)
+		default:
+			q = q.Where("(plugins.created_at, plugins.id) < (SELECT created_at, id FROM plugins WHERE id = ?)", opts.Cursor)
+		}
 	}
 
-	q = q.Order("plugins.created_at DESC").Limit(opts.Limit + 1)
+	q = q.Order(orderClause).Limit(opts.Limit + 1)
 
 	var results []model.PluginWithOwner
 	if err := q.Find(&results).Error; err != nil {
@@ -96,7 +116,7 @@ func (r *PluginRepo) List(ctx context.Context, opts PluginListOptions) ([]model.
 
 	var nextCursor string
 	if len(results) > opts.Limit {
-		nextCursor = results[opts.Limit-1].ID.String()
+		nextCursor = results[opts.Limit].ID.String()
 		results = results[:opts.Limit]
 	}
 	return results, nextCursor, nil
@@ -248,10 +268,10 @@ func (r *PluginRepo) ListAllForAdmin(ctx context.Context, limit int, cursor, vis
 		q = q.Where("plugins.visibility = ?", visibility)
 	}
 	if cursor != "" {
-		q = q.Where("plugins.id > ?", cursor)
+		q = q.Where("(plugins.created_at, plugins.id) < (SELECT created_at, id FROM plugins WHERE id = ?)", cursor)
 	}
 
-	q = q.Order("plugins.created_at DESC").Limit(limit + 1)
+	q = q.Order("plugins.created_at DESC, plugins.id").Limit(limit + 1)
 
 	var results []model.PluginWithOwner
 	if err := q.Find(&results).Error; err != nil {
@@ -260,7 +280,7 @@ func (r *PluginRepo) ListAllForAdmin(ctx context.Context, limit int, cursor, vis
 
 	var nextCursor string
 	if len(results) > limit {
-		nextCursor = results[limit-1].ID.String()
+		nextCursor = results[limit].ID.String()
 		results = results[:limit]
 	}
 	return results, nextCursor, nil

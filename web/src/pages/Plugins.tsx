@@ -20,7 +20,7 @@ export default function Plugins() {
   const loadPage = useCallback(async (page: number, cursor: string) => {
     setLoading(true);
     try {
-      const res = await listPlugins(PAGE_SIZE, cursor);
+      const res = await listPlugins(PAGE_SIZE, cursor, '', sort);
       setPlugins(res.data || []);
       setHasNext(!!res.nextCursor);
       if (res.nextCursor && page >= cursors.length - 1) {
@@ -35,7 +35,7 @@ export default function Plugins() {
     } finally {
       setLoading(false);
     }
-  }, [cursors.length]);
+  }, [cursors.length, sort]);
 
   useEffect(() => {
     loadPage(0, '');

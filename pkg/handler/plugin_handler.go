@@ -57,6 +57,7 @@ func (h *PluginHandler) Publish(c *gin.Context) {
 func (h *PluginHandler) List(c *gin.Context) {
 	opts := repository.PluginListOptions{
 		Category: c.Query("category"),
+		Sort:     c.Query("sort"),
 		Cursor:   c.Query("cursor"),
 		Limit:    queryInt(c, "limit", 20),
 	}
@@ -83,7 +84,7 @@ func (h *PluginHandler) Get(c *gin.Context) {
 	slug := c.Param("slug")
 	p, err := h.svc.Get(c.Request.Context(), slug)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "plugin not found"})
+		writeServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, pluginToJSON(*p))
@@ -94,7 +95,7 @@ func (h *PluginHandler) Versions(c *gin.Context) {
 	slug := c.Param("slug")
 	versions, err := h.svc.Versions(c.Request.Context(), slug)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "plugin not found"})
+		writeServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"versions": versions})
@@ -113,7 +114,7 @@ func (h *PluginHandler) GetFile(c *gin.Context) {
 
 	data, err := h.svc.GetFile(c.Request.Context(), slug, version, filePath)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -133,7 +134,7 @@ func (h *PluginHandler) Download(c *gin.Context) {
 
 	reader, etag, err := h.svc.Download(c.Request.Context(), slug, version)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 	defer reader.Close()
@@ -142,11 +143,8 @@ func (h *PluginHandler) Download(c *gin.Context) {
 		c.Header("ETag", etag)
 	}
 	c.Header("Content-Type", "application/zip")
-	c.Header("Content-Disposition", "attachment; filename="+slug+".zip")
-	c.Stream(func(w io.Writer) bool {
-		_, err := io.Copy(w, reader)
-		return err != nil
-	})
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", slug+".zip"))
+	io.Copy(c.Writer, reader)
 }
 
 func pluginToJSON(p model.PluginWithOwner) gin.H {
@@ -260,6 +258,9 @@ func queryInt(c *gin.Context, key string, def int) int {
 	var n int
 	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n <= 0 {
 		return def
+	}
+	if n > 100 {
+		n = 100
 	}
 	return n
 }

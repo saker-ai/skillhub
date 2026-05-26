@@ -33,10 +33,11 @@ export interface PluginListResponse {
   nextCursor: string;
 }
 
-export function listPlugins(limit = 20, cursor = '', category = ''): Promise<PluginListResponse> {
+export function listPlugins(limit = 20, cursor = '', category = '', sort = ''): Promise<PluginListResponse> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set('cursor', cursor);
   if (category) params.set('category', category);
+  if (sort) params.set('sort', sort);
   return apiFetch(`/plugins?${params}`);
 }
 

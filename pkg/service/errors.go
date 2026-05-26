@@ -21,5 +21,8 @@ var ErrForbidden = errors.New("forbidden")
 // ErrValidation indicates a request-level validation failure (HTTP 400).
 var ErrValidation = errors.New("validation")
 
+// ErrNotFound indicates a resource was not found (HTTP 404).
+var ErrNotFound = errors.New("not found")
+
 // ErrConflict indicates a duplicate/conflict state (HTTP 409).
 var ErrConflict = errors.New("conflict")

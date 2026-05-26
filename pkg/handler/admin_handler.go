@@ -202,7 +202,7 @@ func (h *AdminHandler) ReviewSkill(c *gin.Context) {
 	}
 
 	if err := h.skillSvc.ReviewSkill(c.Request.Context(), reviewerID, slug, approve); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 
@@ -226,7 +226,7 @@ func (h *AdminHandler) SetVisibility(c *gin.Context) {
 	}
 
 	if err := h.skillSvc.SetSkillVisibility(c.Request.Context(), adminID, slug, req.Visibility); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeServiceError(c, err)
 		return
 	}
 

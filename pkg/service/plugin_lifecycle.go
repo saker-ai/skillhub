@@ -25,7 +25,7 @@ func (s *PluginService) SoftDelete(ctx context.Context, user *model.User, slug s
 func (s *PluginService) Undelete(ctx context.Context, user *model.User, slug string) error {
 	p, err := s.pluginRepo.GetBySlugIncludeDeleted(ctx, slug)
 	if err != nil {
-		return fmt.Errorf("plugin not found")
+		return fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
 	}
 	if p.OwnerID != user.ID && !user.IsAdmin() {
 		return fmt.Errorf("%w: not the plugin owner", ErrForbidden)
@@ -89,7 +89,7 @@ func (s *PluginService) ListAllForAdmin(ctx context.Context, limit int, cursor, 
 func (s *PluginService) ReviewPlugin(ctx context.Context, reviewerID *uuid.UUID, slug string, approve bool) error {
 	p, err := s.pluginRepo.GetBySlug(ctx, slug)
 	if err != nil {
-		return fmt.Errorf("plugin not found")
+		return fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
 	}
 	status := "rejected"
 	visibility := p.Visibility
@@ -113,7 +113,7 @@ func (s *PluginService) ReviewPlugin(ctx context.Context, reviewerID *uuid.UUID,
 func (s *PluginService) SetPluginVisibility(ctx context.Context, adminID *uuid.UUID, slug, visibility string) error {
 	p, err := s.pluginRepo.GetBySlug(ctx, slug)
 	if err != nil {
-		return fmt.Errorf("plugin not found")
+		return fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
 	}
 	if visibility != "public" && visibility != "private" {
 		return fmt.Errorf("%w: visibility must be 'public' or 'private'", ErrValidation)
@@ -130,7 +130,7 @@ func (s *PluginService) SetPluginVisibility(ctx context.Context, adminID *uuid.U
 func (s *PluginService) lookupOwnedPlugin(ctx context.Context, user *model.User, slug string) (*model.Plugin, error) {
 	p, err := s.pluginRepo.GetBySlug(ctx, slug)
 	if err != nil {
-		return nil, fmt.Errorf("plugin not found")
+		return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
 	}
 	if p.OwnerID != user.ID && !user.IsAdmin() {
 		return nil, fmt.Errorf("%w: not the plugin owner", ErrForbidden)

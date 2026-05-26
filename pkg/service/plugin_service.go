@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -118,21 +119,6 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 		plug.Tags = input.Tags
 	}
 
-	// Check version doesn't already exist
-	if _, err := s.pluginRepo.GetVersion(ctx, plug.ID, input.Version); err == nil {
-		return nil, fmt.Errorf("%w: version %s already exists", ErrConflict, input.Version)
-	}
-
-	// Version ordering check
-	if existing != nil {
-		latest, err := s.pluginRepo.GetLatestVersion(ctx, plug.ID)
-		if err == nil && latest != nil {
-			if semver.Compare(input.Version, latest.Version) <= 0 {
-				return nil, fmt.Errorf("%w: version %s must be greater than %s", ErrValidation, input.Version, latest.Version)
-			}
-		}
-	}
-
 	// Compute fingerprint
 	fingerprint := computePluginFingerprint(input.Files)
 
@@ -171,6 +157,19 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 	}
 
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var dupVer model.PluginVersion
+		if tx.Where("plugin_id = ? AND version = ?", plug.ID, input.Version).First(&dupVer).Error == nil {
+			return fmt.Errorf("%w: version %s already exists", ErrConflict, input.Version)
+		}
+		if existing != nil {
+			var latest model.PluginVersion
+			if tx.Where("plugin_id = ? AND soft_deleted_at IS NULL AND yanked_at IS NULL", plug.ID).
+				Order("created_at DESC").First(&latest).Error == nil {
+				if semver.Compare(input.Version, latest.Version) <= 0 {
+					return fmt.Errorf("%w: version %s must be greater than %s", ErrValidation, input.Version, latest.Version)
+				}
+			}
+		}
 		if err := tx.Create(&ver).Error; err != nil {
 			return fmt.Errorf("create version: %w", err)
 		}
@@ -201,6 +200,10 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 		}
 		return nil
 	}); err != nil {
+		if !errors.Is(err, ErrConflict) && !errors.Is(err, ErrValidation) {
+			s.logger.Warn("publish transaction failed, stored files may be orphaned",
+				"slug", input.Slug, "version", input.Version, "err", err)
+		}
 		return nil, err
 	}
 	plug.LatestVersionID = &versionID
@@ -239,7 +242,14 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 }
 
 func (s *PluginService) Get(ctx context.Context, slug string) (*model.PluginWithOwner, error) {
-	return s.pluginRepo.GetWithOwner(ctx, slug)
+	p, err := s.pluginRepo.GetWithOwner(ctx, slug)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
+		}
+		return nil, fmt.Errorf("get plugin: %w", err)
+	}
+	return p, nil
 }
 
 func (s *PluginService) List(ctx context.Context, opts repository.PluginListOptions) ([]model.PluginWithOwner, string, error) {
@@ -249,28 +259,39 @@ func (s *PluginService) List(ctx context.Context, opts repository.PluginListOpti
 func (s *PluginService) Versions(ctx context.Context, slug string) ([]model.PluginVersion, error) {
 	p, err := s.pluginRepo.GetBySlug(ctx, slug)
 	if err != nil {
-		return nil, err
+		if isNotFound(err) {
+			return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
+		}
+		return nil, fmt.Errorf("get plugin: %w", err)
 	}
 	return s.pluginRepo.ListVersions(ctx, p.ID)
 }
 
 func (s *PluginService) GetFile(ctx context.Context, slug, version, filePath string) ([]byte, error) {
+	filePath = store.SanitizeStorePath(filePath)
+	if filePath == "invalid" {
+		return nil, fmt.Errorf("%w: invalid file path", ErrValidation)
+	}
+
 	p, err := s.pluginRepo.GetBySlug(ctx, slug)
 	if err != nil {
-		return nil, err
+		if isNotFound(err) {
+			return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
+		}
+		return nil, fmt.Errorf("get plugin: %w", err)
 	}
 
 	if version == "" || version == "latest" {
 		v, err := s.pluginRepo.GetLatestVersion(ctx, p.ID)
 		if err != nil {
-			return nil, fmt.Errorf("no versions found for plugin %s", slug)
+			return nil, fmt.Errorf("%w: no versions found", ErrNotFound)
 		}
 		version = v.Version
 	}
 
 	data, err := s.fileStore.GetFile("_plugins_", slug, version, filePath)
 	if err != nil {
-		return nil, fmt.Errorf("file not found: %s", filePath)
+		return nil, fmt.Errorf("%w: file not found", ErrNotFound)
 	}
 	return data, nil
 }
@@ -278,13 +299,16 @@ func (s *PluginService) GetFile(ctx context.Context, slug, version, filePath str
 func (s *PluginService) Download(ctx context.Context, slug, version string) (io.ReadCloser, string, error) {
 	p, err := s.pluginRepo.GetBySlug(ctx, slug)
 	if err != nil {
-		return nil, "", err
+		if isNotFound(err) {
+			return nil, "", fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
+		}
+		return nil, "", fmt.Errorf("get plugin: %w", err)
 	}
 
 	if version == "" || version == "latest" {
 		v, err := s.pluginRepo.GetLatestVersion(ctx, p.ID)
 		if err != nil {
-			return nil, "", fmt.Errorf("no versions found")
+			return nil, "", fmt.Errorf("%w: no versions found", ErrNotFound)
 		}
 		version = v.Version
 	}
@@ -442,5 +466,5 @@ func derefStrPtr(s *string) string {
 }
 
 func isNotFound(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "record not found")
+	return errors.Is(err, gorm.ErrRecordNotFound)
 }

@@ -26,6 +26,10 @@ func writeServiceError(c *gin.Context, err error) {
 	if err == nil {
 		return
 	}
+	if errors.Is(err, service.ErrNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
 	if errors.Is(err, service.ErrForbidden) {
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return

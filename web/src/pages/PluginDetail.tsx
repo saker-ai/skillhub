@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getPlugin, getPluginVersions, getPluginFile, type Plugin, type PluginVersion } from '../api/plugins';
 
+const basePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+
 export default function PluginDetail() {
   const { slug } = useParams<{ slug: string }>();
   const { t } = useTranslation();
@@ -51,7 +53,6 @@ export default function PluginDetail() {
 
   const title = plugin.displayName || plugin.slug;
   const latestVersion = versions.find(v => !v.yankedAt);
-  const basePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
   const fmt = (d: string) => new Date(d).toLocaleDateString();
   const initial = plugin.ownerHandle?.[0]?.toUpperCase() || '?';
 

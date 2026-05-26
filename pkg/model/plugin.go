@@ -39,8 +39,8 @@ type PluginWithOwner struct {
 // PluginVersion represents a specific version of a plugin.
 type PluginVersion struct {
 	ID            uuid.UUID  `gorm:"column:id;type:text;primaryKey" json:"id"`
-	PluginID      uuid.UUID  `gorm:"column:plugin_id;type:text;not null;index" json:"pluginId"`
-	Version       string     `gorm:"column:version;type:varchar(64);not null" json:"version"`
+	PluginID      uuid.UUID  `gorm:"column:plugin_id;type:text;not null;uniqueIndex:idx_plugin_version" json:"pluginId"`
+	Version       string     `gorm:"column:version;type:varchar(64);not null;uniqueIndex:idx_plugin_version" json:"version"`
 	Fingerprint   string     `gorm:"column:fingerprint;type:varchar(128);not null;index" json:"fingerprint"`
 	Manifest      JSONRaw    `gorm:"column:manifest;type:text;not null;default:'{}'" json:"manifest"`
 	Files         JSONRaw    `gorm:"column:files;type:text;not null;default:'[]'" json:"files"`
