@@ -144,8 +144,12 @@ skillhub plugin publish ./my-plugin \
 | `GET` | `/api/v1/plugins` | 列出所有插件 |
 | `GET` | `/api/v1/plugins/:slug` | 获取插件元信息 |
 | `GET` | `/api/v1/plugins/:slug/versions` | 列出插件版本 |
-| `GET` | `/api/v1/plugins/:slug/file?version=X&path=Y` | 获取插件中的文件 |
-| `GET` | `/api/v1/plugins/:slug/download?version=X` | 下载插件包 |
+| `GET` | `/api/v1/plugins/file?slug=X&version=Y&path=Z` | 获取插件中的文件 |
+| `GET` | `/api/v1/plugins/download?slug=X&version=Y` | 下载插件包 |
+| `DELETE` | `/api/v1/plugins/:slug` | 软删除插件（所有者） |
+| `POST` | `/api/v1/plugins/:slug/undelete` | 恢复已删除插件 |
+| `POST` | `/api/v1/plugins/:slug/versions/:version/yank` | 撤回版本 |
+| `DELETE` | `/api/v1/plugins/:slug/versions/:version/yank` | 取消撤回版本 |
 
 ### 在 Saker 中加载插件
 
@@ -215,7 +219,7 @@ skillhub/
 │   ├── gitstore/            # 裸 Git 仓库存储、镜像推送、Webhook 导入
 │   ├── handler/             # HTTP 处理器（技能、认证、搜索、管理、Web UI）
 │   ├── middleware/          # 认证、限流、请求 ID、日志
-│   ├── model/               # 领域模型（User、Skill、Version、Token、Star）
+│   ├── model/               # 领域模型（User、Skill、Version、Token、Star、Plugin）
 │   ├── repository/          # 数据库访问层（GORM）
 │   ├── search/              # Bleve 全文搜索集成
 │   ├── server/              # 服务启动、路由注册、自动初始化
@@ -271,6 +275,11 @@ skills_dir: ~/.skillhub/skills   # 技能安装目录（可选）
 | `GET` | `/api/v1/skills/:slug/versions` | 版本列表 |
 | `GET` | `/api/v1/skills/:slug/versions/:version` | 获取特定版本 |
 | `GET` | `/api/v1/skills/:slug/file` | 获取技能文件内容 |
+| `GET` | `/api/v1/plugins` | 插件列表 |
+| `GET` | `/api/v1/plugins/:slug` | 插件详情 |
+| `GET` | `/api/v1/plugins/:slug/versions` | 插件版本列表 |
+| `GET` | `/api/v1/plugins/file?slug=X&version=Y&path=Z` | 获取插件文件内容 |
+| `GET` | `/api/v1/plugins/download?slug=X&version=Y` | 下载插件包 |
 | `GET` | `/api/v1/search?q=...` | 全文搜索 |
 | `GET` | `/api/v1/download?slug=...&version=...` | 下载技能 ZIP |
 | `GET` | `/api/v1/resolve` | 解析技能版本 |
@@ -286,6 +295,11 @@ skills_dir: ~/.skillhub/skills   # 技能安装目录（可选）
 | `POST` | `/api/v1/skills` | 发布技能 |
 | `DELETE` | `/api/v1/skills/:slug` | 软删除技能 |
 | `POST` | `/api/v1/skills/:slug/undelete` | 恢复已删除技能 |
+| `POST` | `/api/v1/plugins` | 发布插件 |
+| `DELETE` | `/api/v1/plugins/:slug` | 软删除插件 |
+| `POST` | `/api/v1/plugins/:slug/undelete` | 恢复已删除插件 |
+| `POST` | `/api/v1/plugins/:slug/versions/:version/yank` | 撤回插件版本 |
+| `DELETE` | `/api/v1/plugins/:slug/versions/:version/yank` | 取消撤回插件版本 |
 | `POST` | `/api/v1/stars/:slug` | 收藏技能 |
 | `DELETE` | `/api/v1/stars/:slug` | 取消收藏 |
 
@@ -293,22 +307,18 @@ skills_dir: ~/.skillhub/skills   # 技能安装目录（可选）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `GET` | `/api/v1/users` | 用户列表 |
-| `POST` | `/api/v1/users` | 创建用户 |
-| `POST` | `/api/v1/tokens` | 创建 API Token |
-| `POST` | `/api/v1/users/ban` | 封禁/解封用户 |
-| `POST` | `/api/v1/users/role` | 设置用户角色 |
-
-### 插件接口
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| `POST` | `/api/v1/plugins` | 发布插件 |
-| `GET` | `/api/v1/plugins` | 列出所有插件 |
-| `GET` | `/api/v1/plugins/:slug` | 获取插件元信息 |
-| `GET` | `/api/v1/plugins/:slug/versions` | 列出版本 |
-| `GET` | `/api/v1/plugins/:slug/file` | 获取插件文件内容 |
-| `GET` | `/api/v1/plugins/:slug/download` | 下载插件包 |
+| `GET` | `/api/v1/admin/users` | 用户列表 |
+| `POST` | `/api/v1/admin/users` | 创建用户 |
+| `POST` | `/api/v1/admin/tokens` | 创建 API Token |
+| `POST` | `/api/v1/admin/users/ban` | 封禁/解封用户 |
+| `POST` | `/api/v1/admin/users/role` | 设置用户角色 |
+| `GET` | `/api/v1/admin/skills` | 所有技能列表（任意可见性） |
+| `POST` | `/api/v1/admin/skills/:slug/review` | 审核技能（批准/拒绝） |
+| `POST` | `/api/v1/admin/skills/:slug/visibility` | 设置技能可见性 |
+| `GET` | `/api/v1/admin/plugins` | 所有插件列表（任意可见性） |
+| `POST` | `/api/v1/admin/plugins/:slug/review` | 审核插件（批准/拒绝） |
+| `POST` | `/api/v1/admin/plugins/:slug/visibility` | 设置插件可见性 |
+| `GET` | `/api/v1/admin/audit-logs` | 审计日志列表 |
 
 ### Webhook 接口
 

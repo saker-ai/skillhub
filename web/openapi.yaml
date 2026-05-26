@@ -31,6 +31,8 @@ tags:
     description: Personal API tokens.
   - name: Namespaces
     description: Team namespaces, members, invitations, team tokens.
+  - name: Plugins
+    description: Browse, inspect, publish, manage plugin bundles and versions.
   - name: Stars
   - name: Comments
   - name: Ratings
@@ -119,6 +121,7 @@ paths:
       summary: Full-text search over public skills
       parameters:
         - { name: q,      in: query, required: true,  schema: { type: string }, description: "Query string" }
+        - { name: type,   in: query, required: false, schema: { type: string, enum: [skill, plugin, all], default: all }, description: "Filter by document type" }
         - { name: limit,  in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
         - { name: sort,   in: query, required: false, schema: { type: string }, description: "Bleve sort field, e.g. -downloads" }
@@ -324,6 +327,176 @@ paths:
           content:
             text/plain:
               schema: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ──────────────────────────────────────────────────────────────────
+  # Plugins
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/plugins:
+    get:
+      tags: [Plugins]
+      summary: List plugins (paginated)
+      parameters:
+        - { name: cursor,   in: query, schema: { type: string },  description: "Opaque cursor from previous nextCursor" }
+        - { name: sort,     in: query, schema: { type: string, enum: [created, downloads, stars, name], default: created } }
+        - { name: limit,    in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: category, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Paginated plugin list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:       { type: array, items: { $ref: "#/components/schemas/Plugin" } }
+                  nextCursor: { type: string, nullable: true }
+    post:
+      tags: [Plugins]
+      summary: Publish a new plugin version (multipart)
+      description: |
+        Upload a plugin bundle as multipart form. The archive must contain a `plugin.json`
+        manifest at the root with `name` and `version` fields.
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [slug, version, files]
+              properties:
+                slug:        { type: string, description: "Unique plugin slug" }
+                version:     { type: string, description: "Semver, e.g. 1.0.0" }
+                displayName: { type: string }
+                summary:     { type: string }
+                category:    { type: string }
+                changelog:   { type: string }
+                tags:        { type: string, description: "Comma-separated" }
+                files:
+                  type: array
+                  items: { type: string, format: binary }
+      responses:
+        "200":
+          description: Plugin + new version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plugin:  { $ref: "#/components/schemas/Plugin" }
+                  version: { $ref: "#/components/schemas/PluginVersion" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Version already exists
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /api/v1/plugins/{slug}:
+    parameters:
+      - { name: slug, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Plugins]
+      summary: Get a plugin by slug
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Plugin" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Plugins]
+      summary: Soft-delete a plugin (owner)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/plugins/{slug}/undelete:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Plugins]
+      summary: Restore a soft-deleted plugin (owner)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/plugins/{slug}/versions:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [Plugins]
+      summary: List a plugin's versions
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions: { type: array, items: { $ref: "#/components/schemas/PluginVersion" } }
+
+  /api/v1/plugins/{slug}/versions/{version}/yank:
+    parameters:
+      - { name: slug,    in: path, required: true, schema: { type: string } }
+      - { name: version, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Plugins]
+      summary: Yank a plugin version (mark unsafe, hide from "latest")
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [Plugins]
+      summary: Un-yank a plugin version
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/plugins/file:
+    get:
+      tags: [Plugins]
+      summary: Read one file from a plugin version
+      parameters:
+        - { name: slug,    in: query, required: true,  schema: { type: string } }
+        - { name: version, in: query, required: false, schema: { type: string, default: "latest" } }
+        - { name: path,    in: query, required: false, schema: { type: string, default: "plugin.json" } }
+      responses:
+        "200":
+          description: File content (raw)
+          content:
+            text/plain:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/plugins/download:
+    get:
+      tags: [Plugins]
+      summary: Download a plugin version as ZIP
+      description: Honors `If-None-Match` for ETag-based revalidation.
+      parameters:
+        - { name: slug,    in: query, required: true,  schema: { type: string } }
+        - { name: version, in: query, required: false, schema: { type: string, default: "latest" } }
+        - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Plugin bundle
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "304": { description: Not Modified (ETag matched) }
         "404": { $ref: "#/components/responses/NotFound" }
 
   # ──────────────────────────────────────────────────────────────────
@@ -1116,6 +1289,62 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/MessageOK" }
 
+  /api/v1/admin/plugins:
+    get:
+      tags: [Admin]
+      summary: List all plugins (any visibility)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - { name: visibility, in: query, schema: { type: string, enum: [public, private, pending] } }
+        - { name: cursor,     in: query, schema: { type: string } }
+        - { name: limit,      in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: Plugins
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:       { type: array, items: { $ref: "#/components/schemas/Plugin" } }
+                  nextCursor: { type: string, nullable: true }
+
+  /api/v1/admin/plugins/{slug}/review:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Admin]
+      summary: Approve or reject a plugin
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [approve, reject] }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+
+  /api/v1/admin/plugins/{slug}/visibility:
+    parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Admin]
+      summary: Force-set a plugin's visibility
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visibility]
+              properties:
+                visibility: { type: string, enum: [public, private] }
+      responses:
+        "200": { $ref: "#/components/responses/MessageOK" }
+
   /api/v1/admin/audit-logs:
     get:
       tags: [Admin]
@@ -1289,6 +1518,41 @@ components:
               slug:         { type: string }
               versionRange: { type: string }
         publishedAt:     { type: string, format: date-time }
+
+    Plugin:
+      type: object
+      properties:
+        id:               { type: string, format: uuid }
+        slug:             { type: string }
+        displayName:      { type: string, nullable: true }
+        summary:          { type: string, nullable: true }
+        visibility:       { type: string, enum: [public, private] }
+        category:         { type: string }
+        tags:             { type: array, items: { type: string } }
+        downloads:        { type: integer }
+        starsCount:       { type: integer }
+        versionsCount:    { type: integer }
+        ownerHandle:      { type: string }
+        latestVersionId:  { type: string, format: uuid, nullable: true }
+        moderationStatus: { type: string }
+        createdAt:        { type: string, format: date-time }
+        updatedAt:        { type: string, format: date-time }
+
+    PluginVersion:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        pluginId:    { type: string, format: uuid }
+        version:     { type: string, description: "Semver" }
+        fingerprint: { type: string, description: "SHA-256 hex" }
+        changelog:   { type: string, nullable: true }
+        sha256Hash:  { type: string }
+        manifest:    { type: object, additionalProperties: true, description: "Parsed plugin.json" }
+        files:       { type: array, items: { type: object, properties: { path: { type: string }, size: { type: integer }, sha256: { type: string } } } }
+        createdBy:   { type: string, format: uuid }
+        yankedAt:    { type: string, format: date-time, nullable: true }
+        yankReason:  { type: string, nullable: true }
+        createdAt:   { type: string, format: date-time }
 
     APIToken:
       type: object

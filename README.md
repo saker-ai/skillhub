@@ -144,8 +144,12 @@ skillhub plugin publish ./my-plugin \
 | `GET` | `/api/v1/plugins` | List plugins |
 | `GET` | `/api/v1/plugins/:slug` | Get plugin metadata |
 | `GET` | `/api/v1/plugins/:slug/versions` | List plugin versions |
-| `GET` | `/api/v1/plugins/:slug/file?version=X&path=Y` | Get file from plugin |
-| `GET` | `/api/v1/plugins/:slug/download?version=X` | Download plugin package |
+| `GET` | `/api/v1/plugins/file?slug=X&version=Y&path=Z` | Get file from plugin |
+| `GET` | `/api/v1/plugins/download?slug=X&version=Y` | Download plugin package |
+| `DELETE` | `/api/v1/plugins/:slug` | Soft-delete a plugin (owner) |
+| `POST` | `/api/v1/plugins/:slug/undelete` | Restore a deleted plugin |
+| `POST` | `/api/v1/plugins/:slug/versions/:version/yank` | Yank a version |
+| `DELETE` | `/api/v1/plugins/:slug/versions/:version/yank` | Unyank a version |
 
 ### Loading Plugins in Saker
 
@@ -215,7 +219,7 @@ skillhub/
 │   ├── gitstore/            # Bare Git repo storage, mirror push, webhook import
 │   ├── handler/             # HTTP handlers (skill, auth, search, admin, web UI)
 │   ├── middleware/          # Auth, rate limiting, request ID, logging
-│   ├── model/               # Domain models (User, Skill, Version, Token, Star)
+│   ├── model/               # Domain models (User, Skill, Version, Token, Star, Plugin)
 │   ├── repository/          # Database repositories (GORM)
 │   ├── search/              # Bleve full-text search integration
 │   ├── server/              # Server bootstrap, routing, auto-setup
@@ -271,6 +275,11 @@ skills_dir: ~/.skillhub/skills   # Skill install directory (optional)
 | `GET` | `/api/v1/skills/:slug/versions` | List versions |
 | `GET` | `/api/v1/skills/:slug/versions/:version` | Get specific version |
 | `GET` | `/api/v1/skills/:slug/file` | Get skill file content |
+| `GET` | `/api/v1/plugins` | List plugins |
+| `GET` | `/api/v1/plugins/:slug` | Get plugin metadata |
+| `GET` | `/api/v1/plugins/:slug/versions` | List plugin versions |
+| `GET` | `/api/v1/plugins/file?slug=X&version=Y&path=Z` | Get plugin file content |
+| `GET` | `/api/v1/plugins/download?slug=X&version=Y` | Download plugin package |
 | `GET` | `/api/v1/search?q=...` | Full-text search |
 | `GET` | `/api/v1/download?slug=...&version=...` | Download skill ZIP |
 | `GET` | `/api/v1/resolve` | Resolve skill version |
@@ -286,6 +295,11 @@ skills_dir: ~/.skillhub/skills   # Skill install directory (optional)
 | `POST` | `/api/v1/skills` | Publish a skill |
 | `DELETE` | `/api/v1/skills/:slug` | Soft-delete a skill |
 | `POST` | `/api/v1/skills/:slug/undelete` | Restore a deleted skill |
+| `POST` | `/api/v1/plugins` | Publish a plugin |
+| `DELETE` | `/api/v1/plugins/:slug` | Soft-delete a plugin |
+| `POST` | `/api/v1/plugins/:slug/undelete` | Restore a deleted plugin |
+| `POST` | `/api/v1/plugins/:slug/versions/:version/yank` | Yank a plugin version |
+| `DELETE` | `/api/v1/plugins/:slug/versions/:version/yank` | Unyank a plugin version |
 | `POST` | `/api/v1/stars/:slug` | Star a skill |
 | `DELETE` | `/api/v1/stars/:slug` | Unstar a skill |
 
@@ -293,22 +307,18 @@ skills_dir: ~/.skillhub/skills   # Skill install directory (optional)
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/users` | List users |
-| `POST` | `/api/v1/users` | Create user |
-| `POST` | `/api/v1/tokens` | Create API token |
-| `POST` | `/api/v1/users/ban` | Ban/unban user |
-| `POST` | `/api/v1/users/role` | Set user role |
-
-### Plugin API
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/plugins` | Publish a plugin |
-| `GET` | `/api/v1/plugins` | List plugins |
-| `GET` | `/api/v1/plugins/:slug` | Get plugin metadata |
-| `GET` | `/api/v1/plugins/:slug/versions` | List versions |
-| `GET` | `/api/v1/plugins/:slug/file` | Get plugin file content |
-| `GET` | `/api/v1/plugins/:slug/download` | Download plugin package |
+| `GET` | `/api/v1/admin/users` | List users |
+| `POST` | `/api/v1/admin/users` | Create user |
+| `POST` | `/api/v1/admin/tokens` | Create API token |
+| `POST` | `/api/v1/admin/users/ban` | Ban/unban user |
+| `POST` | `/api/v1/admin/users/role` | Set user role |
+| `GET` | `/api/v1/admin/skills` | List all skills (any visibility) |
+| `POST` | `/api/v1/admin/skills/:slug/review` | Approve/reject skill |
+| `POST` | `/api/v1/admin/skills/:slug/visibility` | Set skill visibility |
+| `GET` | `/api/v1/admin/plugins` | List all plugins (any visibility) |
+| `POST` | `/api/v1/admin/plugins/:slug/review` | Approve/reject plugin |
+| `POST` | `/api/v1/admin/plugins/:slug/visibility` | Set plugin visibility |
+| `GET` | `/api/v1/admin/audit-logs` | List audit log entries |
 
 ### Webhooks
 
