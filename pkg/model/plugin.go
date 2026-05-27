@@ -39,7 +39,7 @@ type PluginWithOwner struct {
 // PluginVersion represents a specific version of a plugin.
 type PluginVersion struct {
 	ID            uuid.UUID  `gorm:"column:id;type:text;primaryKey" json:"id"`
-	PluginID      uuid.UUID  `gorm:"column:plugin_id;type:text;not null;uniqueIndex:idx_plugin_version" json:"pluginId"`
+	PluginID      uuid.UUID  `gorm:"column:plugin_id;type:text;not null;uniqueIndex:idx_plugin_version;index:idx_pluginver_created,priority:1" json:"pluginId"`
 	Version       string     `gorm:"column:version;type:varchar(64);not null;uniqueIndex:idx_plugin_version" json:"version"`
 	Fingerprint   string     `gorm:"column:fingerprint;type:varchar(128);not null;index" json:"fingerprint"`
 	Manifest      JSONRaw    `gorm:"column:manifest;type:text;not null;default:'{}'" json:"manifest"`
@@ -47,7 +47,7 @@ type PluginVersion struct {
 	Changelog     *string    `gorm:"column:changelog;type:text" json:"changelog,omitempty"`
 	CreatedBy     uuid.UUID  `gorm:"column:created_by;type:text;not null" json:"createdBy"`
 	SHA256Hash    string     `gorm:"column:sha256_hash;type:varchar(128);not null;index" json:"sha256Hash"`
-	CreatedAt     time.Time  `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
+	CreatedAt     time.Time  `gorm:"column:created_at;autoCreateTime;index:idx_pluginver_created,priority:2,sort:desc" json:"createdAt"`
 	SoftDeletedAt *time.Time `gorm:"column:soft_deleted_at" json:"softDeletedAt,omitempty"`
 	YankedAt      *time.Time `gorm:"column:yanked_at" json:"yankedAt,omitempty"`
 	YankReason    *string    `gorm:"column:yank_reason;type:text" json:"yankReason,omitempty"`

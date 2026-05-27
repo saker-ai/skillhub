@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"testing"
+
+	"gorm.io/gorm"
 )
 
 func TestComputePluginFingerprint_Deterministic(t *testing.T) {
@@ -169,8 +171,9 @@ func TestIsNotFound(t *testing.T) {
 		want bool
 	}{
 		{nil, false},
-		{fmt.Errorf("record not found"), true},
-		{fmt.Errorf("some: record not found in db"), true},
+		{gorm.ErrRecordNotFound, true},
+		{fmt.Errorf("wrap: %w", gorm.ErrRecordNotFound), true},
+		{fmt.Errorf("record not found"), false},
 		{fmt.Errorf("other error"), false},
 	}
 

@@ -145,7 +145,7 @@ func (s *PluginService) lookupOwnedPluginVersion(ctx context.Context, user *mode
 	}
 	ver, err := s.pluginRepo.GetVersion(ctx, p.ID, version)
 	if err != nil {
-		return nil, nil, fmt.Errorf("version %s not found", version)
+		return nil, nil, fmt.Errorf("%w: version %s", ErrNotFound, version)
 	}
 	return p, ver, nil
 }
