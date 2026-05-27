@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/cinience/skillhub/pkg/model"
@@ -132,7 +133,7 @@ func (r *TokenRepo) Revoke(ctx context.Context, id uuid.UUID) error {
 func (r *TokenRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.APIToken, error) {
 	var token model.APIToken
 	err := r.db.WithContext(ctx).Where("id = ?", id).First(&token).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &token, err

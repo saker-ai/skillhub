@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/google/uuid"
@@ -23,7 +24,7 @@ func (r *NamespaceRepo) Create(ctx context.Context, ns *model.Namespace) error {
 func (r *NamespaceRepo) GetBySlug(ctx context.Context, slug string) (*model.Namespace, error) {
 	var ns model.Namespace
 	err := r.db.WithContext(ctx).Where("slug = ?", slug).First(&ns).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &ns, err
@@ -32,7 +33,7 @@ func (r *NamespaceRepo) GetBySlug(ctx context.Context, slug string) (*model.Name
 func (r *NamespaceRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Namespace, error) {
 	var ns model.Namespace
 	err := r.db.WithContext(ctx).Where("id = ?", id).First(&ns).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &ns, err
@@ -79,7 +80,7 @@ func (r *NamespaceRepo) GetMemberRole(ctx context.Context, namespaceID, userID u
 	err := r.db.WithContext(ctx).
 		Where("namespace_id = ? AND user_id = ?", namespaceID, userID).
 		First(&member).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", nil
 	}
 	if err != nil {

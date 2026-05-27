@@ -13,8 +13,8 @@ func TestComputePluginFingerprint_Deterministic(t *testing.T) {
 		"skills/a/SKILL.md": []byte("# skill a"),
 	}
 
-	fp1 := computePluginFingerprint(files)
-	fp2 := computePluginFingerprint(files)
+	fp1 := computeFingerprint(files)
+	fp2 := computeFingerprint(files)
 
 	if fp1 != fp2 {
 		t.Errorf("fingerprint not deterministic: %s != %s", fp1, fp2)
@@ -32,8 +32,8 @@ func TestComputePluginFingerprint_DifferentFiles(t *testing.T) {
 		"plugin.json": []byte(`{"name":"b","version":"1.0.0"}`),
 	}
 
-	fp1 := computePluginFingerprint(files1)
-	fp2 := computePluginFingerprint(files2)
+	fp1 := computeFingerprint(files1)
+	fp2 := computeFingerprint(files2)
 
 	if fp1 == fp2 {
 		t.Error("different files should produce different fingerprints")
@@ -52,8 +52,8 @@ func TestComputePluginFingerprint_OrderIndependent(t *testing.T) {
 		"b.txt": []byte("bbb"),
 	}
 
-	fp1 := computePluginFingerprint(files1)
-	fp2 := computePluginFingerprint(files2)
+	fp1 := computeFingerprint(files1)
+	fp2 := computeFingerprint(files2)
 
 	if fp1 != fp2 {
 		t.Errorf("fingerprint should be order-independent: %s != %s", fp1, fp2)
@@ -162,6 +162,38 @@ func TestValidatePluginManifest_InvalidJSON(t *testing.T) {
 	err := validatePluginManifest([]byte(`{not json`), nil)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestComputeContentFingerprint_BackwardCompatible(t *testing.T) {
+	files := map[string][]byte{
+		"SKILL.md": []byte("# hello"),
+		"lib.py":   []byte("print('hi')"),
+	}
+	// Content fingerprint must NOT change when files are renamed
+	renamed := map[string][]byte{
+		"README.md": []byte("# hello"),
+		"main.py":   []byte("print('hi')"),
+	}
+	fp1 := computeContentFingerprint(files)
+	fp2 := computeContentFingerprint(renamed)
+	if fp1 != fp2 {
+		t.Errorf("computeContentFingerprint should be name-independent: %s != %s", fp1, fp2)
+	}
+
+	// But computeFingerprint (plugin) MUST differ when names change
+	pfp1 := computeFingerprint(files)
+	pfp2 := computeFingerprint(renamed)
+	if pfp1 == pfp2 {
+		t.Error("computeFingerprint should differ when file names change")
+	}
+
+	// Both must be deterministic and 64 chars
+	if fp1 != computeContentFingerprint(files) {
+		t.Error("computeContentFingerprint not deterministic")
+	}
+	if len(fp1) != 64 {
+		t.Errorf("length = %d, want 64", len(fp1))
 	}
 }
 

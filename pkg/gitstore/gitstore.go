@@ -3,6 +3,7 @@ package gitstore
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,10 +11,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/cinience/skillhub/pkg/semver"
 	"sync"
 	"time"
+
+	"github.com/cinience/skillhub/pkg/semver"
 
 	"github.com/go-git/go-git/v5"
 	gitconfig "github.com/go-git/go-git/v5/config"
@@ -100,7 +101,7 @@ func (g *GitStore) Publish(ctx context.Context, opts PublishOpts) (string, error
 	})
 	if err != nil {
 		// If repo is empty (no commits yet), init a new repo
-		if err == git.ErrRepositoryAlreadyExists || strings.Contains(err.Error(), "remote repository is empty") {
+		if errors.Is(err, git.ErrRepositoryAlreadyExists) || strings.Contains(err.Error(), "remote repository is empty") {
 			workRepo, err = git.PlainInit(tmpDir, false)
 			if err != nil {
 				return "", fmt.Errorf("init temp repo: %w", err)
@@ -329,6 +330,32 @@ func (g *GitStore) ListTags(owner, slug string) ([]string, error) {
 		return semver.Compare(versions[i], versions[j]) > 0
 	})
 	return versions, nil
+}
+
+// DeleteTag deletes a version tag from a bare repo. Idempotent: returns nil if
+// the tag or repo does not exist.
+//
+// Note: this only removes the tag ref. The commit and tree objects remain on
+// the branch until git gc. For orphan cleanup this is acceptable — the files
+// become unreachable via ListTags/Archive/GetFile but the branch history is
+// not rewritten, avoiding the complexity and risk of a forced branch reset.
+func (g *GitStore) DeleteTag(owner, slug, version string) error {
+	repoPath := g.RepoPath(owner, slug)
+	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+		return nil
+	}
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return fmt.Errorf("open repo for tag delete: %w", err)
+	}
+	tagName := "v" + version
+	if err := repo.DeleteTag(tagName); err != nil {
+		if errors.Is(err, git.ErrTagNotFound) {
+			return nil
+		}
+		return fmt.Errorf("delete tag %s: %w", tagName, err)
+	}
+	return nil
 }
 
 // Rename renames a repo and creates a symlink from old to new.

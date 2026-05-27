@@ -54,30 +54,43 @@ func (g *Backend) Publish(ctx context.Context, opts store.PublishOpts) (string, 
 	})
 }
 
-func (g *Backend) Archive(owner, slug, version string) (io.ReadCloser, error) {
+func (g *Backend) Archive(_ context.Context, owner, slug, version string) (io.ReadCloser, error) {
 	return g.gs.Archive(owner, slug, version)
 }
 
-func (g *Backend) GetFile(owner, slug, version, path string) ([]byte, error) {
+func (g *Backend) GetFile(_ context.Context, owner, slug, version, path string) ([]byte, error) {
 	return g.gs.GetFile(owner, slug, version, path)
 }
 
-func (g *Backend) ListVersions(owner, slug string) ([]string, error) {
+func (g *Backend) ListVersions(_ context.Context, owner, slug string) ([]string, error) {
 	return g.gs.ListTags(owner, slug)
 }
 
-func (g *Backend) Exists(owner, slug string) bool {
+func (g *Backend) Exists(_ context.Context, owner, slug string) bool {
 	return g.gs.Exists(owner, slug)
 }
 
-func (g *Backend) Rename(owner, oldSlug, newSlug string) error {
+func (g *Backend) Rename(_ context.Context, owner, oldSlug, newSlug string) error {
+	if !store.ValidatePathComponent(owner) || !store.ValidatePathComponent(oldSlug) || !store.ValidatePathComponent(newSlug) {
+		return fmt.Errorf("invalid owner or slug")
+	}
 	return g.gs.Rename(owner, oldSlug, newSlug)
 }
 
-func (g *Backend) Delete(owner, slug string) error {
+func (g *Backend) Delete(_ context.Context, owner, slug string) error {
+	if !store.ValidatePathComponent(owner) || !store.ValidatePathComponent(slug) {
+		return fmt.Errorf("invalid owner or slug")
+	}
 	repoPath := g.gs.RepoPath(owner, slug)
 	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
 		return nil
 	}
 	return os.RemoveAll(repoPath)
+}
+
+func (g *Backend) DeleteVersion(_ context.Context, owner, slug, version string) error {
+	if !store.ValidatePathComponent(owner) || !store.ValidatePathComponent(slug) || !store.ValidatePathComponent(version) {
+		return fmt.Errorf("invalid owner, slug, or version")
+	}
+	return g.gs.DeleteTag(owner, slug, version)
 }

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/google/uuid"
@@ -59,7 +60,7 @@ func (r *RatingRepo) GetByUserAndSkill(ctx context.Context, userID, skillID uuid
 	err := r.db.WithContext(ctx).
 		Where("user_id = ? AND skill_id = ?", userID, skillID).
 		First(&rating).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &rating, err

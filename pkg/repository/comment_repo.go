@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/cinience/skillhub/pkg/model"
@@ -26,7 +27,7 @@ func (r *CommentRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Comment
 	err := r.db.WithContext(ctx).
 		Where("id = ? AND soft_deleted_at IS NULL", id).
 		First(&c).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &c, err

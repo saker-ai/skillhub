@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -51,7 +52,7 @@ func (r *SkillRepo) GetBySlug(ctx context.Context, slug string) (*model.SkillWit
 		Joins("JOIN users ON skills.owner_id = users.id").
 		Where("skills.slug = ? AND skills.soft_deleted_at IS NULL", slug).
 		First(&skill).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// 不缓存"不存在"——下一秒可能就有人新发布同名 skill，
 		// 缓存负命中会让新 skill 在 TTL 内不可见。
 		return nil, nil
@@ -75,7 +76,7 @@ func (r *SkillRepo) GetBySlugOrAlias(ctx context.Context, slug string) (*model.S
 	// Check aliases
 	var alias model.SkillSlugAlias
 	err = r.db.WithContext(ctx).Where("old_slug = ?", slug).First(&alias).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -89,7 +90,7 @@ func (r *SkillRepo) GetBySlugOrAlias(ctx context.Context, slug string) (*model.S
 		Joins("JOIN users ON skills.owner_id = users.id").
 		Where("skills.id = ? AND skills.soft_deleted_at IS NULL", alias.SkillID).
 		First(&s).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -104,7 +105,7 @@ func (r *SkillRepo) GetBySlugOrAlias(ctx context.Context, slug string) (*model.S
 func (r *SkillRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Skill, error) {
 	var skill model.Skill
 	err := r.db.WithContext(ctx).Where("id = ?", id).First(&skill).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &skill, err

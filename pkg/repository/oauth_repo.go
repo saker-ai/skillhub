@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/cinience/skillhub/pkg/model"
 	"gorm.io/gorm"
@@ -24,7 +25,7 @@ func (r *OAuthRepo) GetByProviderAndExternalID(ctx context.Context, provider, ex
 	err := r.db.WithContext(ctx).
 		Where("provider = ? AND external_id = ?", provider, externalID).
 		First(&identity).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &identity, err

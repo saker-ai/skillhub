@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/cinience/skillhub/pkg/model"
@@ -24,7 +25,7 @@ func (r *NamespaceInvitationRepo) Create(ctx context.Context, inv *model.Namespa
 func (r *NamespaceInvitationRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.NamespaceInvitation, error) {
 	var inv model.NamespaceInvitation
 	err := r.db.WithContext(ctx).Where("id = ?", id).First(&inv).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &inv, err
@@ -36,7 +37,7 @@ func (r *NamespaceInvitationRepo) GetPending(ctx context.Context, namespaceID, i
 	err := r.db.WithContext(ctx).
 		Where("namespace_id = ? AND invitee_id = ? AND status = ?", namespaceID, inviteeID, "pending").
 		First(&inv).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &inv, err

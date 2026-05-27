@@ -15,22 +15,34 @@ type Store interface {
 	Publish(ctx context.Context, opts PublishOpts) (string, error)
 
 	// Archive returns a zip archive stream for the given version.
-	Archive(owner, slug, version string) (io.ReadCloser, error)
+	Archive(ctx context.Context, owner, slug, version string) (io.ReadCloser, error)
 
 	// GetFile reads a single file from a specific version.
-	GetFile(owner, slug, version, path string) ([]byte, error)
+	GetFile(ctx context.Context, owner, slug, version, path string) ([]byte, error)
 
 	// ListVersions returns all version strings sorted descending.
-	ListVersions(owner, slug string) ([]string, error)
+	ListVersions(ctx context.Context, owner, slug string) ([]string, error)
 
 	// Exists checks whether storage for the given skill exists.
-	Exists(owner, slug string) bool
+	Exists(ctx context.Context, owner, slug string) bool
 
 	// Rename renames skill storage from oldSlug to newSlug.
-	Rename(owner, oldSlug, newSlug string) error
+	Rename(ctx context.Context, owner, oldSlug, newSlug string) error
 
 	// Delete removes all storage for a skill (used by admin purge).
-	Delete(owner, slug string) error
+	Delete(ctx context.Context, owner, slug string) error
+
+	// DeleteVersion removes storage for a single version.
+	// Used to clean up orphaned files when a publish transaction fails.
+	DeleteVersion(ctx context.Context, owner, slug, version string) error
+}
+
+// ValidatePathComponent checks that a single path component (owner, slug, version)
+// does not contain traversal sequences or separators. Returns false for unsafe values.
+func ValidatePathComponent(s string) bool {
+	return s != "" && s != "." &&
+		!strings.Contains(s, "/") && !strings.Contains(s, "\\") &&
+		!strings.Contains(s, "..")
 }
 
 // SanitizeStorePath cleans a file path to prevent directory traversal in storage keys.

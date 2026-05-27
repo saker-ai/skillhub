@@ -130,8 +130,7 @@ func (b *Backend) Publish(ctx context.Context, opts store.PublishOpts) (string, 
 	return fmt.Sprintf("oss://%s/%s", b.bucket, metaKey), nil
 }
 
-func (b *Backend) Archive(owner, slug, version string) (io.ReadCloser, error) {
-	ctx := context.Background()
+func (b *Backend) Archive(ctx context.Context, owner, slug, version string) (io.ReadCloser, error) {
 	prefix := b.key(owner, slug, version, "")
 
 	var buf bytes.Buffer
@@ -191,8 +190,7 @@ func (b *Backend) Archive(owner, slug, version string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(buf.Bytes())), nil
 }
 
-func (b *Backend) GetFile(owner, slug, version, path string) ([]byte, error) {
-	ctx := context.Background()
+func (b *Backend) GetFile(ctx context.Context, owner, slug, version, path string) ([]byte, error) {
 	key := b.key(owner, slug, version, path)
 
 	out, err := b.client.GetObject(ctx, &oss.GetObjectRequest{
@@ -207,8 +205,7 @@ func (b *Backend) GetFile(owner, slug, version, path string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(out.Body, 10<<20)) // 10MB limit
 }
 
-func (b *Backend) ListVersions(owner, slug string) ([]string, error) {
-	ctx := context.Background()
+func (b *Backend) ListVersions(ctx context.Context, owner, slug string) ([]string, error) {
 	prefix := b.versionPrefix(owner, slug)
 	delimiter := "/"
 
@@ -246,8 +243,7 @@ func (b *Backend) ListVersions(owner, slug string) ([]string, error) {
 	return versions, nil
 }
 
-func (b *Backend) Exists(owner, slug string) bool {
-	ctx := context.Background()
+func (b *Backend) Exists(ctx context.Context, owner, slug string) bool {
 	prefix := b.versionPrefix(owner, slug)
 	maxKeys := int32(1)
 
@@ -262,12 +258,69 @@ func (b *Backend) Exists(owner, slug string) bool {
 	return len(out.Contents) > 0
 }
 
-func (b *Backend) Delete(owner, slug string) error {
-	return nil // TODO: implement OSS object deletion
+func (b *Backend) Delete(ctx context.Context, owner, slug string) error {
+	if !store.ValidatePathComponent(owner) || !store.ValidatePathComponent(slug) {
+		return fmt.Errorf("invalid owner or slug")
+	}
+	prefix := fmt.Sprintf("%s/%s/%s/", b.prefix, owner, slug)
+	return b.deleteByPrefix(ctx, prefix)
 }
 
-func (b *Backend) Rename(owner, oldSlug, newSlug string) error {
-	ctx := context.Background()
+func (b *Backend) DeleteVersion(ctx context.Context, owner, slug, version string) error {
+	if !store.ValidatePathComponent(owner) || !store.ValidatePathComponent(slug) || !store.ValidatePathComponent(version) {
+		return fmt.Errorf("invalid owner, slug, or version")
+	}
+	prefix := fmt.Sprintf("%s/%s/%s/versions/%s/", b.prefix, owner, slug, version)
+	return b.deleteByPrefix(ctx, prefix)
+}
+
+func (b *Backend) deleteByPrefix(ctx context.Context, prefix string) error {
+	var keys []string
+	var continuationToken *string
+	for {
+		out, err := b.client.ListObjectsV2(ctx, &oss.ListObjectsV2Request{
+			Bucket:            &b.bucket,
+			Prefix:            &prefix,
+			ContinuationToken: continuationToken,
+		})
+		if err != nil {
+			return fmt.Errorf("list objects for delete: %w", err)
+		}
+		for _, obj := range out.Contents {
+			keys = append(keys, *obj.Key)
+		}
+		if !out.IsTruncated {
+			break
+		}
+		continuationToken = out.NextContinuationToken
+	}
+
+	const batchSize = 1000
+	for i := 0; i < len(keys); i += batchSize {
+		end := i + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		batch := make([]oss.DeleteObject, 0, end-i)
+		for _, k := range keys[i:end] {
+			k := k
+			batch = append(batch, oss.DeleteObject{Key: &k})
+		}
+		if _, err := b.client.DeleteMultipleObjects(ctx, &oss.DeleteMultipleObjectsRequest{
+			Bucket:  &b.bucket,
+			Objects: batch,
+			Quiet:   true,
+		}); err != nil {
+			return fmt.Errorf("batch delete objects: %w", err)
+		}
+	}
+	return nil
+}
+
+func (b *Backend) Rename(ctx context.Context, owner, oldSlug, newSlug string) error {
+	if !store.ValidatePathComponent(owner) || !store.ValidatePathComponent(oldSlug) || !store.ValidatePathComponent(newSlug) {
+		return fmt.Errorf("invalid owner or slug")
+	}
 	oldPrefix := fmt.Sprintf("%s/%s/%s/", b.prefix, owner, oldSlug)
 	newPrefix := fmt.Sprintf("%s/%s/%s/", b.prefix, owner, newSlug)
 

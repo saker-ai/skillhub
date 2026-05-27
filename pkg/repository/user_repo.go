@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/cinience/skillhub/pkg/model"
@@ -24,7 +25,7 @@ func (r *UserRepo) Create(ctx context.Context, user *model.User) error {
 func (r *UserRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
 	var user model.User
 	err := r.db.WithContext(ctx).Where("id = ?", id).First(&user).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &user, err
@@ -33,7 +34,7 @@ func (r *UserRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.User, erro
 func (r *UserRepo) GetByHandle(ctx context.Context, handle string) (*model.User, error) {
 	var user model.User
 	err := r.db.WithContext(ctx).Where("handle = ?", handle).First(&user).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &user, err
@@ -94,7 +95,7 @@ func (r *UserRepo) Unban(ctx context.Context, id uuid.UUID) error {
 func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*model.User, error) {
 	var user model.User
 	err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &user, err

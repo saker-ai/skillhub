@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/cinience/skillhub/pkg/model"
@@ -26,7 +27,7 @@ func (r *VersionRepo) GetBySkillAndVersion(ctx context.Context, skillID uuid.UUI
 	err := r.db.WithContext(ctx).
 		Where("skill_id = ? AND version = ? AND soft_deleted_at IS NULL", skillID, version).
 		First(&v).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &v, err
@@ -37,7 +38,7 @@ func (r *VersionRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.SkillVe
 	err := r.db.WithContext(ctx).
 		Where("id = ? AND soft_deleted_at IS NULL", id).
 		First(&v).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &v, err
@@ -49,7 +50,7 @@ func (r *VersionRepo) GetLatest(ctx context.Context, skillID uuid.UUID) (*model.
 		Where("skill_id = ? AND soft_deleted_at IS NULL", skillID).
 		Order("created_at DESC").
 		First(&v).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &v, err
@@ -71,7 +72,7 @@ func (r *VersionRepo) GetByFingerprint(ctx context.Context, fingerprint string) 
 		Joins("JOIN skills ON skill_versions.skill_id = skills.id").
 		Where("skill_versions.fingerprint = ? AND skill_versions.soft_deleted_at IS NULL AND skills.soft_deleted_at IS NULL", fingerprint).
 		First(&v).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &v, err
@@ -85,7 +86,7 @@ func (r *VersionRepo) GetLatestNonYanked(ctx context.Context, skillID uuid.UUID)
 		Where("skill_id = ? AND soft_deleted_at IS NULL AND yanked_at IS NULL", skillID).
 		Order("created_at DESC").
 		First(&v).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &v, err
@@ -138,7 +139,7 @@ func (r *VersionRepo) GetBySHA256(ctx context.Context, hash string) (*model.Skil
 	err := r.db.WithContext(ctx).
 		Where("sha256_hash = ? AND soft_deleted_at IS NULL", hash).
 		First(&v).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &v, err

@@ -1,0 +1,125 @@
+package service
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"path"
+	"sort"
+	"strings"
+
+	"gorm.io/gorm"
+)
+
+const (
+	maxUploadFiles = 500
+	maxFileSize    = 5 * 1024 * 1024 // 5MB per file
+)
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func isNotFound(err error) bool {
+	return errors.Is(err, gorm.ErrRecordNotFound)
+}
+
+func formValue(form *multipart.Form, key string) string {
+	if vals, ok := form.Value[key]; ok && len(vals) > 0 {
+		return strings.TrimSpace(vals[0])
+	}
+	return ""
+}
+
+// computeFingerprint hashes file names and contents together.
+// Used by plugins where file renames must produce a different fingerprint.
+func computeFingerprint(files map[string][]byte) string {
+	keys := make([]string, 0, len(files))
+	for k := range files {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	h := sha256.New()
+	for _, k := range keys {
+		h.Write([]byte(k))
+		h.Write([]byte{0})
+		h.Write(files[k])
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// computeContentFingerprint hashes only file contents (not names).
+// Used by skills to preserve backward-compatible fingerprints for existing versions.
+func computeContentFingerprint(files map[string][]byte) string {
+	var hashParts []string
+	for _, content := range files {
+		h := sha256.Sum256(content)
+		hashParts = append(hashParts, hex.EncodeToString(h[:]))
+	}
+	sort.Strings(hashParts)
+	aggregate := sha256.Sum256([]byte(strings.Join(hashParts, ":")))
+	return hex.EncodeToString(aggregate[:])
+}
+
+// ReadMultipartFiles reads all files from a multipart form.
+func ReadMultipartFiles(form *multipart.Form) (map[string][]byte, error) {
+	files := make(map[string][]byte)
+	for _, headers := range form.File {
+		for _, header := range headers {
+			if len(files) >= maxUploadFiles {
+				return nil, fmt.Errorf("too many files (max %d)", maxUploadFiles)
+			}
+			if header.Size > maxFileSize {
+				return nil, fmt.Errorf("file %s exceeds max size (%d bytes)", header.Filename, maxFileSize)
+			}
+			name := multipartFileName(header)
+			name = sanitizeFilePath(name)
+			if name == "" {
+				continue
+			}
+			f, err := header.Open()
+			if err != nil {
+				return nil, fmt.Errorf("open file %s: %w", name, err)
+			}
+			data, err := io.ReadAll(io.LimitReader(f, maxFileSize+1))
+			_ = f.Close()
+			if err != nil {
+				return nil, fmt.Errorf("read file %s: %w", name, err)
+			}
+			if int64(len(data)) > maxFileSize {
+				return nil, fmt.Errorf("file %s exceeds max size (%d bytes)", name, maxFileSize)
+			}
+			files[name] = data
+		}
+	}
+	return files, nil
+}
+
+func multipartFileName(fh *multipart.FileHeader) string {
+	if cd := fh.Header.Get("Content-Disposition"); cd != "" {
+		if _, params, err := mime.ParseMediaType(cd); err == nil {
+			if fn := params["filename"]; fn != "" {
+				return fn
+			}
+		}
+	}
+	return fh.Filename
+}
+
+func sanitizeFilePath(name string) string {
+	name = path.Clean(name)
+	name = strings.TrimPrefix(name, "/")
+	if name == "." || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
+		return ""
+	}
+	return name
+}

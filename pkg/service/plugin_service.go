@@ -34,6 +34,13 @@ type PluginService struct {
 	logger       *slog.Logger
 }
 
+func (s *PluginService) loggerOrDefault() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
+}
+
 func NewPluginService(db *gorm.DB, repo *repository.PluginRepo, fs store.Store, sc *search.Client, auditSvc *AuditService, logger *slog.Logger) *PluginService {
 	return &PluginService{
 		db:           db,
@@ -120,7 +127,7 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 	}
 
 	// Compute fingerprint
-	fingerprint := computePluginFingerprint(input.Files)
+	fingerprint := computeFingerprint(input.Files)
 
 	// Build files manifest
 	filesManifest := buildFilesManifest(input.Files)
@@ -201,14 +208,16 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 		return nil
 	}); err != nil {
 		if !errors.Is(err, ErrConflict) && !errors.Is(err, ErrValidation) {
-			s.logger.Warn("publish transaction failed, stored files may be orphaned",
-				"slug", input.Slug, "version", input.Version, "err", err)
+			if cleanErr := s.fileStore.DeleteVersion(ctx, "_plugins_", input.Slug, input.Version); cleanErr != nil {
+				s.loggerOrDefault().Warn("failed to clean orphaned plugin files",
+					"slug", input.Slug, "version", input.Version, "err", cleanErr)
+			}
 		}
 		return nil, err
 	}
 	plug.LatestVersionID = &versionID
 
-	s.logger.Info("plugin published",
+	s.loggerOrDefault().Info("plugin published",
 		"slug", input.Slug, "version", input.Version, "owner", input.OwnerID)
 
 	if s.searchClient != nil {
@@ -219,8 +228,8 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 		doc := &search.PluginDocument{
 			ID:               plug.ID.String(),
 			Slug:             plug.Slug,
-			DisplayName:      derefStrPtr(plug.DisplayName),
-			Summary:          derefStrPtr(plug.Summary),
+			DisplayName:      derefStr(plug.DisplayName),
+			Summary:          derefStr(plug.Summary),
 			DocType:          "plugin",
 			Category:         plug.Category,
 			Tags:             []string(plug.Tags),
@@ -234,7 +243,7 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 			CreatedAt:        plug.CreatedAt.Unix(),
 		}
 		if err := s.searchClient.IndexPlugin(ctx, doc); err != nil {
-			s.logger.Warn("failed to index plugin", "slug", input.Slug, "err", err)
+			s.loggerOrDefault().Warn("failed to index plugin", "slug", input.Slug, "err", err)
 		}
 	}
 
@@ -289,7 +298,7 @@ func (s *PluginService) GetFile(ctx context.Context, slug, version, filePath str
 		version = v.Version
 	}
 
-	data, err := s.fileStore.GetFile("_plugins_", slug, version, filePath)
+	data, err := s.fileStore.GetFile(ctx, "_plugins_", slug, version, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: file not found", ErrNotFound)
 	}
@@ -321,7 +330,7 @@ func (s *PluginService) Download(ctx context.Context, slug, version string) (io.
 		}
 	}
 
-	reader, err := s.fileStore.Archive("_plugins_", slug, version)
+	reader, err := s.fileStore.Archive(ctx, "_plugins_", slug, version)
 	if err != nil {
 		return nil, "", fmt.Errorf("build archive: %w", err)
 	}
@@ -368,12 +377,6 @@ func (s *PluginService) ParseMultipartPublish(form *multipart.Form) (*PluginPubl
 	return input, nil
 }
 
-func formValue(form *multipart.Form, key string) string {
-	if vals, ok := form.Value[key]; ok && len(vals) > 0 {
-		return strings.TrimSpace(vals[0])
-	}
-	return ""
-}
 
 func validatePluginManifest(data []byte, files map[string][]byte) error {
 	var manifest struct {
@@ -416,22 +419,6 @@ func validatePluginManifest(data []byte, files map[string][]byte) error {
 	return nil
 }
 
-func computePluginFingerprint(files map[string][]byte) string {
-	keys := make([]string, 0, len(files))
-	for k := range files {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	h := sha256.New()
-	for _, k := range keys {
-		h.Write([]byte(k))
-		h.Write([]byte{0})
-		h.Write(files[k])
-		h.Write([]byte{0})
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
 
 type fileManifestEntry struct {
 	Path   string `json:"path"`
@@ -458,13 +445,3 @@ func buildFilesManifest(files map[string][]byte) []fileManifestEntry {
 	return entries
 }
 
-func derefStrPtr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-func isNotFound(err error) bool {
-	return errors.Is(err, gorm.ErrRecordNotFound)
-}

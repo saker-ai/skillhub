@@ -5,14 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"mime"
-	"mime/multipart"
-	"path"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/cinience/skillhub/pkg/gitstore"
@@ -333,9 +330,8 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		}
 	}
 
-	// Validate and compute file metadata and fingerprint
+	// Validate file paths and compute metadata
 	var filesMeta []model.VersionFile
-	var hashParts []string
 	for path, content := range req.Files {
 		cleanPath := sanitizeFilePath(path)
 		if cleanPath == "" {
@@ -347,17 +343,13 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 			path = cleanPath
 		}
 		h := sha256.Sum256(content)
-		fileHash := hex.EncodeToString(h[:])
 		filesMeta = append(filesMeta, model.VersionFile{
 			Path:   path,
 			Size:   int64(len(content)),
-			SHA256: fileHash,
+			SHA256: hex.EncodeToString(h[:]),
 		})
-		hashParts = append(hashParts, fileHash)
 	}
-	sort.Strings(hashParts)
-	aggregateHash := sha256.Sum256([]byte(strings.Join(hashParts, ":")))
-	fingerprint := hex.EncodeToString(aggregateHash[:])
+	fingerprint := computeContentFingerprint(req.Files)
 
 	filesJSON, _ := json.Marshal(filesMeta)
 
@@ -480,6 +472,12 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		}
 		return nil
 	}); err != nil {
+		if !errors.Is(err, ErrConflict) && !errors.Is(err, ErrValidation) {
+			if cleanErr := s.fileStore.DeleteVersion(ctx, user.Handle, req.Slug, version); cleanErr != nil {
+				s.loggerOrDefault().Warn("failed to clean orphaned skill files",
+					"slug", req.Slug, "version", version, "err", cleanErr)
+			}
+		}
 		return nil, nil, err
 	}
 
@@ -589,7 +587,7 @@ func (s *SkillService) Download(ctx context.Context, slug, version, identityHash
 		return nil, err
 	}
 
-	archive, err := s.fileStore.Archive(skill.OwnerHandle, slug, ver.Version)
+	archive, err := s.fileStore.Archive(ctx, skill.OwnerHandle, slug, ver.Version)
 	if err != nil {
 		return nil, fmt.Errorf("create archive: %w", err)
 	}
@@ -641,7 +639,7 @@ func (s *SkillService) GetFile(ctx context.Context, slug, version, filePath stri
 		version = v.Version
 	}
 
-	content, err := s.fileStore.GetFile(skill.OwnerHandle, slug, version, cleanPath)
+	content, err := s.fileStore.GetFile(ctx, skill.OwnerHandle, slug, version, cleanPath)
 	if err != nil {
 		return nil, err
 	}
@@ -841,7 +839,7 @@ func (s *SkillService) PurgeBySlug(ctx context.Context, user *model.User, slug s
 	}
 	skill, _ := s.skillRepo.GetBySlugIncludeDeleted(ctx, slug)
 	if skill != nil {
-		_ = s.fileStore.Delete(skill.OwnerHandle, slug)
+		_ = s.fileStore.Delete(ctx, skill.OwnerHandle, slug)
 	}
 	if err := s.skillRepo.HardDeleteBySlug(ctx, slug); err != nil {
 		return err
@@ -904,75 +902,6 @@ func (s *SkillService) Unstar(ctx context.Context, userID uuid.UUID, slug string
 	})
 }
 
-const (
-	maxUploadFiles = 500
-	maxFileSize    = 5 * 1024 * 1024 // 5MB per file
-)
-
-// ReadMultipartFiles reads all files from a multipart form.
-func ReadMultipartFiles(form *multipart.Form) (map[string][]byte, error) {
-	files := make(map[string][]byte)
-	for _, headers := range form.File {
-		for _, header := range headers {
-			if len(files) >= maxUploadFiles {
-				return nil, fmt.Errorf("too many files (max %d)", maxUploadFiles)
-			}
-			if header.Size > maxFileSize {
-				return nil, fmt.Errorf("file %s exceeds max size (%d bytes)", header.Filename, maxFileSize)
-			}
-			name := multipartFileName(header)
-			name = sanitizeFilePath(name)
-			if name == "" {
-				continue
-			}
-			f, err := header.Open()
-			if err != nil {
-				return nil, fmt.Errorf("open file %s: %w", name, err)
-			}
-			data, err := io.ReadAll(io.LimitReader(f, maxFileSize+1))
-			_ = f.Close()
-			if err != nil {
-				return nil, fmt.Errorf("read file %s: %w", name, err)
-			}
-			if int64(len(data)) > maxFileSize {
-				return nil, fmt.Errorf("file %s exceeds max size (%d bytes)", name, maxFileSize)
-			}
-			files[name] = data
-		}
-	}
-	return files, nil
-}
-
-// multipartFileName extracts the original filename from a multipart file header.
-// Go 1.22+ applies filepath.Base() to FileHeader.Filename, stripping directory
-// paths. We parse the raw Content-Disposition header to recover the full relative path.
-func multipartFileName(fh *multipart.FileHeader) string {
-	if cd := fh.Header.Get("Content-Disposition"); cd != "" {
-		if _, params, err := mime.ParseMediaType(cd); err == nil {
-			if fn := params["filename"]; fn != "" {
-				return fn
-			}
-		}
-	}
-	return fh.Filename
-}
-
-// sanitizeFilePath cleans a user-supplied file path, rejecting traversal attempts.
-func sanitizeFilePath(name string) string {
-	name = path.Clean(name)
-	name = strings.TrimPrefix(name, "/")
-	if name == "." || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
-		return ""
-	}
-	return name
-}
-
-func derefStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
 
 func extractFrontmatter(content []byte) json.RawMessage {
 	s := string(content)
