@@ -156,7 +156,7 @@ type PublishRequest struct {
 // skill.OwnerID 检查,只要求目标 skill 隶属同一个 namespace。
 //
 // tokenNS == nil(个人 token / cookie 会话)走旧路径：必须本人 owner 或系统 admin。
-func (s *SkillService) authorizeSkillWrite(skillNS *uuid.UUID, ownerID uuid.UUID, user *model.User, tokenNS *uuid.UUID) error {
+func (s *SkillService) authorizeSkillWrite(ctx context.Context, skillNS *uuid.UUID, ownerID uuid.UUID, user *model.User, tokenNS *uuid.UUID) error {
 	if tokenNS != nil {
 		if skillNS == nil || *skillNS != *tokenNS {
 			return fmt.Errorf("%w: team token cannot operate on skills outside its namespace", ErrForbidden)
@@ -167,7 +167,7 @@ func (s *SkillService) authorizeSkillWrite(skillNS *uuid.UUID, ownerID uuid.UUID
 		return nil
 	}
 	if skillNS != nil && s.nsSvc != nil {
-		role, err := s.nsSvc.GetMemberRole(context.Background(), *skillNS, user.ID)
+		role, err := s.nsSvc.GetMemberRole(ctx, *skillNS, user.ID)
 		if err == nil && role != "" && role != "reader" {
 			return nil
 		}
@@ -353,7 +353,7 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		}
 	} else {
 		// Verify ownership / namespace token scoping.
-		if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, req.TokenNamespace); err != nil {
+		if err := s.authorizeSkillWrite(ctx, skill.NamespaceID, skill.OwnerID, user, req.TokenNamespace); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -910,7 +910,7 @@ func (s *SkillService) SoftDelete(ctx context.Context, user *model.User, ref mod
 	if skill == nil {
 		return fmt.Errorf("skill not found")
 	}
-	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
+	if err := s.authorizeSkillWrite(ctx, skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
 		return err
 	}
 	if err := s.skillRepo.SoftDelete(ctx, skill.ID); err != nil {
@@ -955,7 +955,7 @@ func (s *SkillService) Undelete(ctx context.Context, user *model.User, ref model
 	if skill == nil {
 		return fmt.Errorf("skill not found")
 	}
-	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
+	if err := s.authorizeSkillWrite(ctx, skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
 		return err
 	}
 	if err := s.skillRepo.Undelete(ctx, skill.ID); err != nil {
@@ -1009,7 +1009,6 @@ func (s *SkillService) Unstar(ctx context.Context, userID uuid.UUID, ref model.S
 	})
 }
 
-
 // TransferSkill moves a skill from its current namespace to a different one.
 // The caller must be owner/admin of the source namespace AND a member of the target namespace.
 func (s *SkillService) TransferSkill(ctx context.Context, user *model.User, ref model.SkillRef, targetNSSlug string, tokenNS *uuid.UUID) error {
@@ -1020,7 +1019,7 @@ func (s *SkillService) TransferSkill(ctx context.Context, user *model.User, ref 
 	if skill == nil {
 		return fmt.Errorf("%w: skill not found", ErrNotFound)
 	}
-	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
+	if err := s.authorizeSkillWrite(ctx, skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
 		return err
 	}
 
@@ -1088,7 +1087,7 @@ func (s *SkillService) UpdateFile(ctx context.Context, user *model.User, req Upd
 	if skill == nil {
 		return nil, nil, fmt.Errorf("skill not found: %s", req.Ref)
 	}
-	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, req.TokenNamespace); err != nil {
+	if err := s.authorizeSkillWrite(ctx, skill.NamespaceID, skill.OwnerID, user, req.TokenNamespace); err != nil {
 		return nil, nil, err
 	}
 

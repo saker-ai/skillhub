@@ -106,7 +106,7 @@ func (s *SkillService) lookupOwnedVersion(ctx context.Context, user *model.User,
 	if skill == nil {
 		return nil, nil, fmt.Errorf("skill not found")
 	}
-	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
+	if err := s.authorizeSkillWrite(ctx, skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
 		return nil, nil, err
 	}
 	ver, err := s.versionRepo.GetBySkillAndVersion(ctx, skill.ID, version)

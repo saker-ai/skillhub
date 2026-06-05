@@ -33,6 +33,7 @@ type skillFixtures struct {
 	svc         *SkillService
 	skillRepo   *repository.SkillRepo
 	versionRepo *repository.VersionRepo
+	nsSvc       *NamespaceService
 	owner       *model.User
 	other       *model.User
 	admin       *model.User
@@ -98,6 +99,7 @@ func setupSkillFixtures(t *testing.T) *skillFixtures {
 		svc:         svc,
 		skillRepo:   skillRepo,
 		versionRepo: versionRepo,
+		nsSvc:       nsSvc,
 		owner:       owner,
 		other:       other,
 		admin:       admin,
@@ -121,6 +123,29 @@ func (fx *skillFixtures) publishBaseSkill(t *testing.T, slug string, as *model.U
 }
 
 func ptrUUID(u uuid.UUID) *uuid.UUID { return &u }
+
+func (fx *skillFixtures) publishNamespaceSkill(t *testing.T, nsSlug, slug string, memberRole string) *model.SkillWithOwner {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := fx.nsSvc.Create(ctx, fx.owner, nsSlug, "", "", "team"); err != nil {
+		t.Fatalf("create namespace %s: %v", nsSlug, err)
+	}
+	if memberRole != "" {
+		if err := fx.nsSvc.AddMember(ctx, fx.owner, nsSlug, fx.other.Handle, memberRole); err != nil {
+			t.Fatalf("add %s as %s: %v", fx.other.Handle, memberRole, err)
+		}
+	}
+	skill, _, err := fx.svc.PublishVersion(ctx, fx.owner, PublishRequest{
+		Slug:          slug,
+		Version:       "1.0.0",
+		NamespaceSlug: nsSlug,
+		Files:         map[string][]byte{"SKILL.md": []byte("---\nname: " + slug + "\n---\n# " + slug + "\n")},
+	})
+	if err != nil {
+		t.Fatalf("publish namespace skill %s/%s: %v", nsSlug, slug, err)
+	}
+	return skill
+}
 
 // TestSkillService_PublishVersion exercises the validation and authorization
 // gates inside PublishVersion. Each subtest gets a fresh fixture so DB
@@ -325,6 +350,43 @@ func TestSkillService_SoftDelete(t *testing.T) {
 				if got.SoftDeletedAt == nil {
 					t.Errorf("expected SoftDeletedAt to be set")
 				}
+			}
+		})
+	}
+}
+
+func TestSkillService_SoftDelete_NamespaceRoles(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		memberRole string
+		wantErr    error
+	}{
+		{name: "namespace admin can delete", memberRole: "admin"},
+		{name: "namespace member can delete", memberRole: "member"},
+		{name: "namespace reader forbidden", memberRole: "reader", wantErr: ErrForbidden},
+		{name: "non-member forbidden", memberRole: "", wantErr: ErrForbidden},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fx := setupSkillFixtures(t)
+			nsSlug := "team-" + strings.ReplaceAll(tc.name, " ", "-")
+			slug := "demo"
+			fx.publishNamespaceSkill(t, nsSlug, slug, tc.memberRole)
+
+			err := fx.svc.SoftDelete(context.Background(), fx.other, model.SkillRef{Namespace: nsSlug, Slug: slug}, nil)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("SoftDelete: want errors.Is %v, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SoftDelete: unexpected error %v", err)
 			}
 		})
 	}

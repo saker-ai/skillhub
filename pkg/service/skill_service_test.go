@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -102,7 +103,7 @@ func TestAuthorizeSkillWrite(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := s.authorizeSkillWrite(tc.skillNS, tc.ownerID, tc.actor, tc.tokenNS)
+			err := s.authorizeSkillWrite(context.Background(), tc.skillNS, tc.ownerID, tc.actor, tc.tokenNS)
 			if tc.wantErr && err == nil {
 				t.Fatalf("authorizeSkillWrite: want error, got nil")
 			}
