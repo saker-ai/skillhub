@@ -59,6 +59,9 @@ func (h *SearchHandler) Search(c *gin.Context) {
 	if docType := c.Query("type"); docType == "skill" || docType == "plugin" {
 		filters += " AND docType = " + docType
 	}
+	if ns := c.Query("namespace"); ns != "" {
+		filters += " AND namespaceSlug = " + ns
+	}
 
 	result, err := h.searchClient.Search(c.Request.Context(), query, limit, offset, sortFields, filters)
 	if err != nil {

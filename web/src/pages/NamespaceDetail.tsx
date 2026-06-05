@@ -8,6 +8,8 @@ import {
   type Namespace,
   type NamespaceMember,
 } from '../api/namespaces';
+import { listSkills, type Skill } from '../api/skills';
+import SkillCard from '../components/SkillCard';
 import {
   listTeamTokens,
   createTeamToken,
@@ -35,6 +37,7 @@ export default function NamespaceDetail() {
   const [ns, setNs] = useState<Namespace | null>(null);
   const [members, setMembers] = useState<NamespaceMember[]>([]);
   const [tokens, setTokens] = useState<TeamToken[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -59,16 +62,16 @@ export default function NamespaceDetail() {
     setLoading(true);
     setError('');
     try {
-      const [n, m, tk] = await Promise.all([
+      const [n, m, tk, sk] = await Promise.all([
         getNamespace(slug),
         listMembers(slug),
-        // Tokens may 403 for non-owner/admin members — surface the error
-        // gracefully rather than failing the whole page.
         listTeamTokens(slug).catch(() => ({ data: [] as TeamToken[] })),
+        listSkills(100, '', 'updated', slug).catch(() => ({ data: [] as Skill[], nextCursor: '' })),
       ]);
       setNs(n);
       setMembers(m.data || []);
       setTokens(tk.data || []);
+      setSkills(sk.data || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load namespace');
     } finally {
@@ -202,6 +205,18 @@ export default function NamespaceDetail() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Skills in this namespace */}
+      <section style={{ marginBottom: '2.5rem' }}>
+        <h2>{t('namespaces.skills', 'Skills')}</h2>
+        {skills.length === 0 ? (
+          <div style={{ color: 'var(--muted, #6b7280)' }}>{t('namespaces.no_skills', 'No skills in this namespace yet.')}</div>
+        ) : (
+          <div className="skill-grid">
+            {skills.map(s => <SkillCard key={s.slug} {...s} />)}
+          </div>
+        )}
       </section>
 
       {/* Tokens section — only visible if user can manage them. The list comes

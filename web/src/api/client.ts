@@ -1,5 +1,15 @@
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api/v1';
 
+export class ApiError extends Error {
+  status: number;
+  body: Record<string, unknown>;
+  constructor(status: number, body: Record<string, unknown>) {
+    super((body.error as string) || `HTTP ${status}`);
+    this.status = status;
+    this.body = body;
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {};
   // Don't set Content-Type for FormData — browser sets it with boundary
@@ -13,7 +23,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `HTTP ${res.status}`);
+    throw new ApiError(res.status, body);
   }
   return res.json();
 }

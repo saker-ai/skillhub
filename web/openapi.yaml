@@ -202,9 +202,14 @@ paths:
     get:
       tags: [Skills]
       summary: Get a skill by slug
+      description: |
+        Returns 409 with a `candidates` list when the bare slug exists in
+        multiple namespaces. Use `/api/v1/skills/@{namespace}/{slug}` to
+        disambiguate.
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Skill" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/AmbiguousSlug" }
     delete:
       tags: [Skills]
       summary: Soft-delete a skill (owner)
@@ -213,6 +218,7 @@ paths:
         "200": { $ref: "#/components/responses/MessageOK" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/AmbiguousSlug" }
 
   /api/v1/skills/{slug}/undelete:
     parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
@@ -328,6 +334,265 @@ paths:
             text/plain:
               schema: { type: string }
         "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Skills]
+      summary: Update a single file (auto-bumps patch version)
+      description: |
+        Replaces one file in the latest version and publishes a new version
+        with the patch number incremented. Accepts multipart/form-data or JSON.
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                path:      { type: string, default: "SKILL.md", description: "File to replace" }
+                content:   { type: string, description: "New file content" }
+                changelog: { type: string, description: "Optional change description" }
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                path:      { type: string, default: "SKILL.md" }
+                file:      { type: string, format: binary }
+                changelog: { type: string }
+      responses:
+        "200":
+          description: Updated skill and new version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skill:   { $ref: "#/components/schemas/Skill" }
+                  version: { $ref: "#/components/schemas/SkillVersion" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/AmbiguousSlug" }
+
+  # ──────────────────────────────────────────────────────────────────
+  # Namespace-qualified skill routes
+  # ──────────────────────────────────────────────────────────────────
+  /api/v1/skills/@{namespace}/{slug}:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string }, description: "Namespace slug (without @ prefix)" }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Skills]
+      summary: Get a skill by namespace and slug
+      responses:
+        "200": { description: Skill detail, content: { application/json: { schema: { $ref: "#/components/schemas/Skill" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Skills]
+      summary: Soft-delete a skill (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { description: Deleted, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/skills/@{namespace}/{slug}/purge:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [Skills]
+      summary: Hard-purge a skill (admin only, namespace-qualified)
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200": { description: Purged, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+
+  /api/v1/skills/@{namespace}/{slug}/undelete:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Skills]
+      summary: Restore a soft-deleted skill (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { description: Restored, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+
+  /api/v1/skills/@{namespace}/{slug}/request-public:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Skills]
+      summary: Request public visibility (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { description: Review requested, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+
+  /api/v1/skills/@{namespace}/{slug}/versions:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Skills]
+      summary: List versions (namespace-qualified)
+      responses:
+        "200":
+          description: Version list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions: { type: array, items: { $ref: "#/components/schemas/SkillVersion" } }
+
+  /api/v1/skills/@{namespace}/{slug}/versions/{version}:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+      - { name: version,   in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Skills]
+      summary: Get a specific version (namespace-qualified)
+      responses:
+        "200": { description: Version detail, content: { application/json: { schema: { $ref: "#/components/schemas/SkillVersion" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/skills/@{namespace}/{slug}/versions/{version}/yank:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+      - { name: version,   in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Skills]
+      summary: Yank a version (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }
+      responses:
+        "200": { description: Yanked, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+    delete:
+      tags: [Skills]
+      summary: Unyank a version (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { description: Unyanked, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+
+  /api/v1/skills/@{namespace}/{slug}/versions/{version}/deprecate:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+      - { name: version,   in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Skills]
+      summary: Deprecate a version (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { message: { type: string } } } } } }
+      responses:
+        "200": { description: Deprecated, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+    delete:
+      tags: [Skills]
+      summary: Undeprecate a version (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { description: Undeprecated, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+
+  /api/v1/skills/@{namespace}/{slug}/file:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Skills]
+      summary: Read one file (namespace-qualified)
+      parameters:
+        - { name: version, in: query, schema: { type: string, default: "latest" } }
+        - { name: path,    in: query, schema: { type: string, default: "SKILL.md" } }
+      responses:
+        "200": { description: File content, content: { text/plain: { schema: { type: string } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Skills]
+      summary: Update a single file (namespace-qualified, auto-bumps patch version)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                path:      { type: string, default: "SKILL.md" }
+                content:   { type: string }
+                changelog: { type: string }
+      responses:
+        "200":
+          description: Updated skill and new version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skill:   { $ref: "#/components/schemas/Skill" }
+                  version: { $ref: "#/components/schemas/SkillVersion" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/skills/@{namespace}/{slug}/ratings:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Ratings]
+      summary: List ratings (namespace-qualified)
+      responses:
+        "200": { description: Ratings, content: { application/json: { schema: { type: object } } } }
+    post:
+      tags: [Ratings]
+      summary: Rate a skill (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [score], properties: { score: { type: integer, minimum: 1, maximum: 5 }, comment: { type: string } } } } } }
+      responses:
+        "200": { description: Rating saved, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+    delete:
+      tags: [Ratings]
+      summary: Delete own rating (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { description: Rating deleted, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+
+  /api/v1/skills/@{namespace}/{slug}/comments:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Comments]
+      summary: List comments (namespace-qualified)
+      responses:
+        "200": { description: Comments, content: { application/json: { schema: { type: object } } } }
+    post:
+      tags: [Comments]
+      summary: Post a comment (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string } } } } } }
+      responses:
+        "200": { description: Comment created, content: { application/json: { schema: { type: object } } } }
+
+  /api/v1/stars/@{namespace}/{slug}:
+    parameters:
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: slug,      in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Stars]
+      summary: Star a skill (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { description: Starred, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+    delete:
+      tags: [Stars]
+      summary: Unstar a skill (namespace-qualified)
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { description: Unstarred, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
 
   # ──────────────────────────────────────────────────────────────────
   # Plugins
@@ -1439,6 +1704,22 @@ components:
     NotFound:
       description: Resource not found.
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Conflict:
+      description: Conflict — e.g. duplicate resource or ambiguous slug.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    AmbiguousSlug:
+      description: |
+        The bare slug matches skills in multiple namespaces. Re-issue the
+        request with a namespace-qualified path: `/api/v1/skills/@<namespace>/<slug>`.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:      { type: string, example: "ambiguous slug 'my-skill': exists in multiple namespaces" }
+              candidates:
+                type: array
+                items: { $ref: "#/components/schemas/AmbiguousCandidate" }
     MessageOK:
       description: Success.
       content:
@@ -1449,6 +1730,13 @@ components:
               message: { type: string }
 
   schemas:
+    AmbiguousCandidate:
+      type: object
+      properties:
+        namespace:   { type: string, description: "Namespace slug" }
+        slug:        { type: string }
+        ownerHandle: { type: string }
+        skillId:     { type: string, format: uuid }
     Error:
       type: object
       properties:
@@ -1494,6 +1782,7 @@ components:
         stars:         { type: integer }
         ownerId:       { type: string, format: uuid }
         namespaceId:   { type: string, format: uuid, nullable: true }
+        namespaceSlug: { type: string, description: "Slug of the namespace this skill belongs to" }
         createdAt:     { type: string, format: date-time }
         updatedAt:     { type: string, format: date-time }
 

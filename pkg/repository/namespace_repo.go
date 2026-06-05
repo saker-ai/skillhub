@@ -122,6 +122,64 @@ func (r *NamespaceRepo) TransferOwnership(ctx context.Context, namespaceID, oldO
 	})
 }
 
+// GetPersonalByOwnerID returns the personal namespace for a user, or nil if none exists.
+func (r *NamespaceRepo) GetPersonalByOwnerID(ctx context.Context, ownerID uuid.UUID) (*model.Namespace, error) {
+	var ns model.Namespace
+	err := r.db.WithContext(ctx).
+		Where("owner_id = ? AND type = 'personal'", ownerID).
+		First(&ns).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &ns, err
+}
+
+// EnsurePersonalNamespace finds or creates a personal namespace for the given user.
+// The namespace slug is set to the user's handle. Thread-safe: concurrent calls
+// for the same user will race on INSERT but the loser hits a unique constraint
+// violation and falls back to a SELECT.
+func (r *NamespaceRepo) EnsurePersonalNamespace(ctx context.Context, user *model.User) (*model.Namespace, error) {
+	ns, err := r.GetPersonalByOwnerID(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	if ns != nil {
+		return ns, nil
+	}
+
+	ns = &model.Namespace{
+		ID:      uuid.New(),
+		Slug:    user.Handle,
+		OwnerID: user.ID,
+		Type:    "personal",
+		Status:  "active",
+	}
+
+	if err := r.db.WithContext(ctx).Create(ns).Error; err != nil {
+		// Race: another goroutine created it first — just fetch.
+		existing, err2 := r.GetPersonalByOwnerID(ctx, user.ID)
+		if err2 != nil {
+			return nil, err2
+		}
+		if existing != nil {
+			return existing, nil
+		}
+		return nil, err
+	}
+
+	member := &model.NamespaceMember{
+		ID:          uuid.New(),
+		NamespaceID: ns.ID,
+		UserID:      user.ID,
+		Role:        "owner",
+	}
+	if err := r.db.WithContext(ctx).Create(member).Error; err != nil {
+		return nil, err
+	}
+
+	return ns, nil
+}
+
 // Delete removes a namespace.
 func (r *NamespaceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

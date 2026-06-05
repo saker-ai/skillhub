@@ -71,6 +71,11 @@ func (s *NamespaceService) metricsOrDefault() *metrics.Metrics {
 	return metrics.Default
 }
 
+// EnsurePersonalNamespace finds or creates the personal namespace for a user.
+func (s *NamespaceService) EnsurePersonalNamespace(ctx context.Context, user *model.User) (*model.Namespace, error) {
+	return s.nsRepo.EnsurePersonalNamespace(ctx, user)
+}
+
 // Create creates a new namespace and adds the creator as owner.
 func (s *NamespaceService) Create(ctx context.Context, user *model.User, slug, displayName, description, nsType string) (*model.Namespace, error) {
 	if !nsSlugRe.MatchString(slug) {

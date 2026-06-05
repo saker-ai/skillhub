@@ -84,7 +84,11 @@ func setupSkillFixtures(t *testing.T) *skillFixtures {
 
 	auditSvc := NewAuditService(auditRepo)
 
+	nsRepo := repository.NewNamespaceRepo(db)
+	nsSvc := NewNamespaceService(nsRepo, userRepo)
+
 	svc := NewSkillService(db, skillRepo, versionRepo, userRepo, downloadRepo, starRepo, fileStore, nil, nil, auditSvc)
+	svc.SetNamespaceService(nsSvc)
 	// Private registry so SkillPublished counters don't leak across tests
 	// running in parallel — same reason the cascade fixture uses one.
 	svc.SetMetrics(metrics.New(prometheus.NewRegistry()))
@@ -297,7 +301,7 @@ func TestSkillService_SoftDelete(t *testing.T) {
 				fx.publishBaseSkill(t, slug, fx.owner)
 			}
 
-			err := fx.svc.SoftDelete(context.Background(), tc.as(fx), slug, nil)
+			err := fx.svc.SoftDelete(context.Background(), tc.as(fx), model.SkillRef{Slug: slug}, nil)
 			switch {
 			case tc.wantErr != nil:
 				if !errors.Is(err, tc.wantErr) {
@@ -347,7 +351,7 @@ func TestSkillService_YankVersion(t *testing.T) {
 		{
 			name: "double yank rejected",
 			setup: func(t *testing.T, fx *skillFixtures, slug string) {
-				if err := fx.svc.YankVersion(context.Background(), fx.owner, slug, "1.0.0", "first", nil); err != nil {
+				if err := fx.svc.YankVersion(context.Background(), fx.owner, model.SkillRef{Slug: slug}, "1.0.0", "first", nil); err != nil {
 					t.Fatalf("priming yank: %v", err)
 				}
 			},
@@ -380,7 +384,7 @@ func TestSkillService_YankVersion(t *testing.T) {
 				tc.setup(t, fx, slug)
 			}
 
-			err := fx.svc.YankVersion(context.Background(), tc.as(fx), slug, tc.version, "test reason", nil)
+			err := fx.svc.YankVersion(context.Background(), tc.as(fx), model.SkillRef{Slug: slug}, tc.version, "test reason", nil)
 			if tc.wantErrStr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErrStr) {
 					t.Fatalf("YankVersion: want error containing %q, got %v", tc.wantErrStr, err)
@@ -434,7 +438,7 @@ func TestSkillService_DeprecateVersion(t *testing.T) {
 
 			ctx := context.Background()
 			if tc.prePrime {
-				if err := fx.svc.DeprecateVersion(ctx, fx.owner, slug, "1.0.0", "buggy", nil); err != nil {
+				if err := fx.svc.DeprecateVersion(ctx, fx.owner, model.SkillRef{Slug: slug}, "1.0.0", "buggy", nil); err != nil {
 					t.Fatalf("priming deprecate: %v", err)
 				}
 			}
@@ -442,9 +446,9 @@ func TestSkillService_DeprecateVersion(t *testing.T) {
 			var err error
 			switch tc.op {
 			case "deprecate":
-				err = fx.svc.DeprecateVersion(ctx, fx.owner, slug, "1.0.0", "buggy", nil)
+				err = fx.svc.DeprecateVersion(ctx, fx.owner, model.SkillRef{Slug: slug}, "1.0.0", "buggy", nil)
 			case "undeprecate":
-				err = fx.svc.UndeprecateVersion(ctx, fx.owner, slug, "1.0.0", nil)
+				err = fx.svc.UndeprecateVersion(ctx, fx.owner, model.SkillRef{Slug: slug}, "1.0.0", nil)
 			default:
 				t.Fatalf("unknown op %q", tc.op)
 			}
@@ -510,7 +514,7 @@ func TestSkillService_RequestPublic(t *testing.T) {
 				}
 			}
 
-			err := fx.svc.RequestPublic(ctx, tc.as(fx), slug)
+			err := fx.svc.RequestPublic(ctx, tc.as(fx), model.SkillRef{Slug: slug})
 			if tc.wantErrStr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErrStr) {
 					t.Fatalf("RequestPublic: want error containing %q, got %v", tc.wantErrStr, err)
@@ -530,4 +534,71 @@ func TestSkillService_RequestPublic(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSkillService_UpdateFile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("happy: update SKILL.md bumps patch", func(t *testing.T) {
+		t.Parallel()
+		fx := setupSkillFixtures(t)
+		slug := "demo"
+		fx.publishBaseSkill(t, slug, fx.owner)
+
+		ctx := context.Background()
+		newContent := []byte("---\nname: demo\n---\n# Updated\n")
+
+		skill, ver, err := fx.svc.UpdateFile(ctx, fx.owner, UpdateFileRequest{
+			Ref:     model.SkillRef{Slug: slug},
+			Path:    "SKILL.md",
+			Content: newContent,
+		})
+		if err != nil {
+			t.Fatalf("UpdateFile: %v", err)
+		}
+		if ver.Version != "1.0.1" {
+			t.Errorf("version = %q, want 1.0.1", ver.Version)
+		}
+		if skill == nil {
+			t.Fatal("expected non-nil skill")
+		}
+
+		content, err := fx.svc.GetFile(ctx, model.SkillRef{Slug: slug}, "1.0.1", "SKILL.md", fx.owner)
+		if err != nil {
+			t.Fatalf("GetFile after update: %v", err)
+		}
+		if string(content) != string(newContent) {
+			t.Errorf("content mismatch: got %q", string(content))
+		}
+	})
+
+	t.Run("reject: non-owner forbidden", func(t *testing.T) {
+		t.Parallel()
+		fx := setupSkillFixtures(t)
+		slug := "demo"
+		fx.publishBaseSkill(t, slug, fx.owner)
+
+		_, _, err := fx.svc.UpdateFile(context.Background(), fx.other, UpdateFileRequest{
+			Ref:     model.SkillRef{Slug: slug},
+			Path:    "SKILL.md",
+			Content: []byte("hacked"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "forbidden") {
+			t.Fatalf("expected forbidden error, got %v", err)
+		}
+	})
+
+	t.Run("reject: no versions published", func(t *testing.T) {
+		t.Parallel()
+		fx := setupSkillFixtures(t)
+
+		_, _, err := fx.svc.UpdateFile(context.Background(), fx.owner, UpdateFileRequest{
+			Ref:     model.SkillRef{Slug: "nonexistent"},
+			Path:    "SKILL.md",
+			Content: []byte("data"),
+		})
+		if err == nil {
+			t.Fatal("expected error for nonexistent skill")
+		}
+	})
 }

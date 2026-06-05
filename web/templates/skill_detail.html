@@ -9,7 +9,7 @@
                 <span style="color: var(--text-secondary); font-size: 0.9rem;">{{.Skill.OwnerHandle}}</span>
             </div>
             <h1 class="detail-title" title="{{displayNameTooltip .Skill.DisplayName .Skill.Slug 80}}">{{displayNameText .Skill.DisplayName .Skill.Slug 80}}</h1>
-            <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px; font-family: monospace;">{{.Skill.OwnerHandle}}/{{.Skill.Slug}}</div>
+            <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px; font-family: monospace;">{{if .Skill.NamespaceSlug}}@{{.Skill.NamespaceSlug}}{{else}}@{{.Skill.OwnerHandle}}{{end}}/{{.Skill.Slug}}</div>
             {{if .Skill.Summary}}<p class="detail-summary">{{deref .Skill.Summary}}</p>{{end}}
             <div class="detail-stats">
                 <div class="stat">
@@ -56,7 +56,7 @@
                         <div class="sidebar-label">Install</div>
                         <div class="code-block" style="padding: 10px 14px; font-size: 0.8rem;">
                             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-                            <span class="cmd">skillhub install {{.Skill.Slug}}</span>
+                            <span class="cmd">skillhub install @{{if .Skill.NamespaceSlug}}{{.Skill.NamespaceSlug}}{{else}}{{.Skill.OwnerHandle}}{{end}}/{{.Skill.Slug}}</span>
                         </div>
                     </div>
                     <div class="sidebar-section">
@@ -81,7 +81,7 @@
                     </div>
                     {{if .LatestVersion}}
                     <div class="sidebar-section">
-                        <a href="/api/v1/download?slug={{.Skill.Slug}}&version={{.LatestVersion.Version}}" class="btn btn-secondary" style="width: 100%; justify-content: center;">
+                        <a href="/api/v1/download?slug={{.Skill.Slug}}&namespace={{if .Skill.NamespaceSlug}}{{.Skill.NamespaceSlug}}{{end}}&version={{.LatestVersion.Version}}" class="btn btn-secondary" style="width: 100%; justify-content: center;">
                             &#8615; Download ZIP
                         </a>
                     </div>

@@ -37,6 +37,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/skills" element={<Skills />} />
             <Route path="/skills/:slug" element={<SkillDetail />} />
+            <Route path="/skills/@:namespace/:slug" element={<SkillDetail />} />
             <Route path="/search" element={<Search />} />
             <Route path="/publish" element={<Publish />} />
             <Route path="/login" element={<Login />} />

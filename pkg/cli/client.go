@@ -91,6 +91,19 @@ func (c *Client) Search(query string) (map[string]interface{}, error) {
 	return result, err
 }
 
+// skillPath builds the API path for a skill reference.
+// Accepts "@namespace/slug" or bare "slug".
+func skillPath(ref string) string {
+	if strings.HasPrefix(ref, "@") {
+		if idx := strings.IndexByte(ref[1:], '/'); idx > 0 {
+			ns := ref[1 : idx+1]
+			slug := ref[idx+2:]
+			return "/api/v1/skills/@" + url.PathEscape(ns) + "/" + url.PathEscape(slug)
+		}
+	}
+	return "/api/v1/skills/" + url.PathEscape(ref)
+}
+
 // ListSkills calls GET /api/v1/skills
 func (c *Client) ListSkills(sort string, limit int) (map[string]interface{}, error) {
 	path := fmt.Sprintf("/api/v1/skills?sort=%s&limit=%d", url.QueryEscape(sort), limit)
@@ -99,23 +112,35 @@ func (c *Client) ListSkills(sort string, limit int) (map[string]interface{}, err
 	return result, err
 }
 
-// GetSkill calls GET /api/v1/skills/:slug
-func (c *Client) GetSkill(slug string) (map[string]interface{}, error) {
+// GetSkill calls GET /api/v1/skills/:slug or /api/v1/skills/@:namespace/:slug
+func (c *Client) GetSkill(ref string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.getJSON("/api/v1/skills/"+url.PathEscape(slug), &result)
+	err := c.getJSON(skillPath(ref), &result)
 	return result, err
 }
 
-// GetVersions calls GET /api/v1/skills/:slug/versions
-func (c *Client) GetVersions(slug string) (map[string]interface{}, error) {
+// GetVersions calls GET /api/v1/skills/:slug/versions (supports @namespace/slug)
+func (c *Client) GetVersions(ref string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.getJSON("/api/v1/skills/"+url.PathEscape(slug)+"/versions", &result)
+	err := c.getJSON(skillPath(ref)+"/versions", &result)
 	return result, err
 }
 
-// Download calls GET /api/v1/download and returns the response body (ZIP)
-func (c *Client) Download(slug, version string) (io.ReadCloser, error) {
-	path := fmt.Sprintf("/api/v1/download?slug=%s&version=%s", url.QueryEscape(slug), url.QueryEscape(version))
+// Download calls GET /api/v1/download and returns the response body (ZIP).
+// ref supports "@namespace/slug" or bare "slug".
+func (c *Client) Download(ref, version string) (io.ReadCloser, error) {
+	params := url.Values{"version": {version}}
+	if strings.HasPrefix(ref, "@") {
+		if idx := strings.IndexByte(ref[1:], '/'); idx > 0 {
+			params.Set("namespace", ref[1:idx+1])
+			params.Set("slug", ref[idx+2:])
+		} else {
+			params.Set("slug", ref)
+		}
+	} else {
+		params.Set("slug", ref)
+	}
+	path := "/api/v1/download?" + params.Encode()
 	resp, err := c.do("GET", path, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)

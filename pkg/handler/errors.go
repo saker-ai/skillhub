@@ -34,6 +34,14 @@ func writeServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
+	var ambErr *service.AmbiguousSlugError
+	if errors.As(err, &ambErr) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":      ambErr.Error(),
+			"candidates": ambErr.Candidates,
+		})
+		return
+	}
 	if errors.Is(err, service.ErrConflict) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return

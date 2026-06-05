@@ -6,6 +6,7 @@ export interface SearchHit {
   summary: string;
   tags: string[];
   ownerHandle?: string;
+  namespaceSlug?: string;
   stars?: number;
   downloads?: number;
 }

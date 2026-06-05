@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/cinience/skillhub/pkg/middleware"
+	"github.com/cinience/skillhub/pkg/model"
 	"github.com/cinience/skillhub/pkg/service"
 	"github.com/gin-gonic/gin"
 )
@@ -43,13 +44,14 @@ func (h *DownloadHandler) Download(c *gin.Context) {
 		return
 	}
 
+	ref := model.SkillRef{Namespace: c.Query("namespace"), Slug: slug}
 	version := c.DefaultQuery("version", "latest")
 	viewer := middleware.GetUser(c)
 
 	// Fast path: if client sent If-None-Match and fingerprint matches current version,
 	// return 304 without recording a download or building the zip.
 	if inm := c.GetHeader("If-None-Match"); inm != "" {
-		_, ver, err := h.svc.ResolveVersion(c.Request.Context(), slug, version, viewer)
+		_, ver, err := h.svc.ResolveVersion(c.Request.Context(), ref, version, viewer)
 		if err == nil && ver != nil && matchesETag(inm, ver.Fingerprint) {
 			c.Header("ETag", quoteETag(ver.Fingerprint))
 			c.Status(http.StatusNotModified)
@@ -61,7 +63,7 @@ func (h *DownloadHandler) Download(c *gin.Context) {
 	hash := sha256.Sum256([]byte(c.ClientIP()))
 	identityHash := hex.EncodeToString(hash[:])
 
-	result, err := h.svc.Download(c.Request.Context(), slug, version, identityHash, viewer)
+	result, err := h.svc.Download(c.Request.Context(), ref, version, identityHash, viewer)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

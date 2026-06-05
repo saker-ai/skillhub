@@ -33,6 +33,14 @@ func New(cfg config.SearchConfig) (*Client, error) {
 		idx, err = bleve.New(indexPath, buildMapping())
 	} else {
 		idx, err = bleve.Open(indexPath)
+		if err == nil {
+			// Existing indexes created before namespace support lack the
+			// namespaceSlug field mapping. Namespace-filtered searches will
+			// silently return no results. Operators should delete the index
+			// directory and restart to rebuild with namespace support.
+			fmt.Fprintf(os.Stderr, "NOTE: if namespace search filtering returns no results, "+
+				"delete %s and restart to rebuild the index.\n", indexPath)
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("open bleve index: %w", err)
@@ -63,6 +71,7 @@ func buildMapping() mapping.IndexMapping {
 	skillMapping.AddFieldMappingsAt("visibility", keywordField)
 	skillMapping.AddFieldMappingsAt("moderationStatus", keywordField)
 	skillMapping.AddFieldMappingsAt("ownerHandleExact", keywordField)
+	skillMapping.AddFieldMappingsAt("namespaceSlug", keywordField)
 
 	// Boolean filter fields
 	skillMapping.AddFieldMappingsAt("isSuspicious", boolField)
@@ -89,6 +98,7 @@ type SkillDocument struct {
 	Tags             []string `json:"tags"`
 	OwnerHandle      string   `json:"ownerHandle"`
 	OwnerHandleExact string   `json:"ownerHandleExact"`
+	NamespaceSlug    string   `json:"namespaceSlug"`
 	Visibility       string   `json:"visibility"`
 	ModerationStatus string   `json:"moderationStatus"`
 	IsSuspicious     bool     `json:"isSuspicious"`

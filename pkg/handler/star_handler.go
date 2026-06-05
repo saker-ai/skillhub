@@ -19,9 +19,9 @@ func NewStarHandler(svc *service.SkillService) *StarHandler {
 // Star handles POST /api/v1/stars/:slug
 func (h *StarHandler) Star(c *gin.Context) {
 	user := middleware.GetUser(c)
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 
-	if err := h.svc.Star(c.Request.Context(), user.ID, slug); err != nil {
+	if err := h.svc.Star(c.Request.Context(), user.ID, ref); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -32,9 +32,9 @@ func (h *StarHandler) Star(c *gin.Context) {
 // Unstar handles DELETE /api/v1/stars/:slug
 func (h *StarHandler) Unstar(c *gin.Context) {
 	user := middleware.GetUser(c)
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 
-	if err := h.svc.Unstar(c.Request.Context(), user.ID, slug); err != nil {
+	if err := h.svc.Unstar(c.Request.Context(), user.ID, ref); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

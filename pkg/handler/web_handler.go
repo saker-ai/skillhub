@@ -53,10 +53,10 @@ func formatTemplateDisplayName(raw, fallback any, maxLength int) (string, string
 
 // WebSkillService defines the skill operations needed by the web UI.
 type WebSkillService interface {
-	ListSkills(ctx context.Context, limit int, cursor, sort, category string, viewer *model.User) ([]model.SkillWithOwner, string, error)
-	GetSkill(ctx context.Context, slug string, viewer *model.User) (*model.SkillWithOwner, error)
-	GetVersions(ctx context.Context, slug string, viewer *model.User) ([]model.SkillVersion, error)
-	GetFile(ctx context.Context, slug, version, path string, viewer *model.User) ([]byte, error)
+	ListSkills(ctx context.Context, limit int, cursor, sort, category, namespaceSlug string, viewer *model.User) ([]model.SkillWithOwner, string, error)
+	GetSkill(ctx context.Context, ref model.SkillRef, viewer *model.User) (*model.SkillWithOwner, error)
+	GetVersions(ctx context.Context, ref model.SkillRef, viewer *model.User) ([]model.SkillVersion, error)
+	GetFile(ctx context.Context, ref model.SkillRef, version, path string, viewer *model.User) ([]byte, error)
 }
 
 // WebSearchService defines the search operations needed by the web UI.
@@ -167,7 +167,7 @@ func (h *WebHandler) render(c *gin.Context, name string, data gin.H) {
 func (h *WebHandler) Index(c *gin.Context) {
 	ctx := c.Request.Context()
 	viewer := middleware.GetUser(c)
-	skills, _, _ := h.svc.ListSkills(ctx, 6, "", "downloads", "", viewer)
+	skills, _, _ := h.svc.ListSkills(ctx, 6, "", "downloads", "", "", viewer)
 
 	h.render(c, "index.html", gin.H{
 		"Title":  "",
@@ -183,7 +183,7 @@ func (h *WebHandler) Skills(c *gin.Context) {
 	viewer := middleware.GetUser(c)
 
 	category := c.Query("category")
-	skills, nextCursor, _ := h.svc.ListSkills(ctx, 20, cursor, sort, category, viewer)
+	skills, nextCursor, _ := h.svc.ListSkills(ctx, 20, cursor, sort, category, "", viewer)
 
 	h.render(c, "skills.html", gin.H{
 		"Title":      "Skills",
@@ -199,14 +199,15 @@ func (h *WebHandler) SkillDetail(c *gin.Context) {
 	slug := c.Param("slug")
 	viewer := middleware.GetUser(c)
 
-	skill, err := h.svc.GetSkill(ctx, slug, viewer)
+	ref := model.SkillRef{Slug: slug}
+	skill, err := h.svc.GetSkill(ctx, ref, viewer)
 	if err != nil || skill == nil {
 		c.String(http.StatusNotFound, "Skill not found")
 		return
 	}
 
 	// Get versions
-	versions, _ := h.svc.GetVersions(ctx, slug, viewer)
+	versions, _ := h.svc.GetVersions(ctx, ref, viewer)
 
 	// Get latest version
 	var latestVersion interface{}
@@ -216,7 +217,7 @@ func (h *WebHandler) SkillDetail(c *gin.Context) {
 
 	// Render SKILL.md as HTML
 	var skillMdHTML template.HTML
-	content, err := h.svc.GetFile(ctx, slug, "latest", "SKILL.md", viewer)
+	content, err := h.svc.GetFile(ctx, ref, "latest", "SKILL.md", viewer)
 	if err == nil && len(content) > 0 {
 		content = stripFrontmatter(content)
 		var buf bytes.Buffer

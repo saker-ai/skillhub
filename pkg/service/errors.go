@@ -26,3 +26,29 @@ var ErrNotFound = errors.New("not found")
 
 // ErrConflict indicates a duplicate/conflict state (HTTP 409).
 var ErrConflict = errors.New("conflict")
+
+// AmbiguousCandidate is one entry in the disambiguation list returned when
+// a bare slug matches multiple skills across namespaces.
+type AmbiguousCandidate struct {
+	Namespace string `json:"namespace"`
+	Slug      string `json:"slug"`
+	OwnerHandle string `json:"ownerHandle"`
+	SkillID   string `json:"skillId"`
+}
+
+// AmbiguousSlugError is returned when a bare slug (without namespace qualifier)
+// matches multiple skills across different namespaces. The caller should
+// present the candidates and ask the user to qualify the slug with @namespace/.
+type AmbiguousSlugError struct {
+	Slug       string
+	Candidates []AmbiguousCandidate
+}
+
+func (e *AmbiguousSlugError) Error() string {
+	return "ambiguous slug '" + e.Slug + "': exists in multiple namespaces"
+}
+
+// Is returns true for ErrConflict so writeServiceError maps this to HTTP 409.
+func (e *AmbiguousSlugError) Is(target error) bool {
+	return target == ErrConflict
+}

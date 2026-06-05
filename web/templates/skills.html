@@ -16,13 +16,13 @@
         {{if .Skills}}
         <div class="skill-grid">
             {{range .Skills}}
-            <a href="/skills/{{.Slug}}">
+            <a href="/skills/@{{if .NamespaceSlug}}{{.NamespaceSlug}}{{else}}{{.OwnerHandle}}{{end}}/{{.Slug}}">
                 <div class="card">
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
                         <div class="owner-avatar" style="width: 28px; height: 28px; font-size: 0.7rem; flex-shrink: 0;">{{initial .OwnerHandle}}</div>
                         <div style="min-width: 0;">
                             <div class="card-title" style="margin-bottom: 0;" title="{{displayNameTooltip .DisplayName .Slug 48}}">{{displayNameText .DisplayName .Slug 48}}</div>
-                            <div style="font-size: 0.75rem; color: var(--text-muted);">{{.OwnerHandle}}/{{.Slug}}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">@{{if .NamespaceSlug}}{{.NamespaceSlug}}{{else}}{{.OwnerHandle}}{{end}}/{{.Slug}}</div>
                         </div>
                     </div>
                     <div class="card-summary">{{if .Summary}}{{deref .Summary}}{{else}}No description{{end}}</div>

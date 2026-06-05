@@ -30,37 +30,37 @@ type mockSkillService struct {
 	getVersionFn  func(ctx context.Context, slug, version string) (*model.SkillVersion, error)
 }
 
-func (m *mockSkillService) ListSkills(ctx context.Context, limit int, cursor, sort, category string, _ *model.User) ([]model.SkillWithOwner, string, error) {
+func (m *mockSkillService) ListSkills(ctx context.Context, limit int, cursor, sort, category, namespaceSlug string, _ *model.User) ([]model.SkillWithOwner, string, error) {
 	if m.listSkillsFn != nil {
 		return m.listSkillsFn(ctx, limit, cursor, sort)
 	}
 	return nil, "", nil
 }
 
-func (m *mockSkillService) GetSkill(ctx context.Context, slug string, _ *model.User) (*model.SkillWithOwner, error) {
+func (m *mockSkillService) GetSkill(ctx context.Context, ref model.SkillRef, _ *model.User) (*model.SkillWithOwner, error) {
 	if m.getSkillFn != nil {
-		return m.getSkillFn(ctx, slug)
+		return m.getSkillFn(ctx, ref.Slug)
 	}
 	return nil, nil
 }
 
-func (m *mockSkillService) GetVersions(ctx context.Context, slug string, _ *model.User) ([]model.SkillVersion, error) {
+func (m *mockSkillService) GetVersions(ctx context.Context, ref model.SkillRef, _ *model.User) ([]model.SkillVersion, error) {
 	if m.getVersionsFn != nil {
-		return m.getVersionsFn(ctx, slug)
+		return m.getVersionsFn(ctx, ref.Slug)
 	}
 	return nil, nil
 }
 
-func (m *mockSkillService) GetFile(ctx context.Context, slug, version, path string, _ *model.User) ([]byte, error) {
+func (m *mockSkillService) GetFile(ctx context.Context, ref model.SkillRef, version, path string, _ *model.User) ([]byte, error) {
 	if m.getFileFn != nil {
-		return m.getFileFn(ctx, slug, version, path)
+		return m.getFileFn(ctx, ref.Slug, version, path)
 	}
 	return nil, nil
 }
 
-func (m *mockSkillService) GetVersion(ctx context.Context, slug, version string, _ *model.User) (*model.SkillVersion, error) {
+func (m *mockSkillService) GetVersion(ctx context.Context, ref model.SkillRef, version string, _ *model.User) (*model.SkillVersion, error) {
 	if m.getVersionFn != nil {
-		return m.getVersionFn(ctx, slug, version)
+		return m.getVersionFn(ctx, ref.Slug, version)
 	}
 	return nil, nil
 }

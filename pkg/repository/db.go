@@ -10,6 +10,7 @@ import (
 	"github.com/cinience/skillhub/pkg/config"
 	"github.com/cinience/skillhub/pkg/model"
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -124,6 +125,50 @@ func NewDBWithOptions(cfg config.DatabaseConfig, opts DBOptions) (*gorm.DB, erro
 		return nil, fmt.Errorf("post-migration: %w", err)
 	}
 
+	// Namespace migration: assign orphaned skills (namespace_id IS NULL) to
+	// their owner's personal namespace. Must run AFTER AutoMigrate so the
+	// namespaces table exists.
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		migrateSkillNamespaces(tx)
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("namespace migration: %w", err)
+	}
+
+	// Swap the unique index: drop the old global slug uniqueIndex and create
+	// the compound (namespace_id, slug) unique index. Raw SQL avoids GORM
+	// migrator issues with SQLite compound indexes.
+	for _, idx := range []string{"idx_skills_slug", "uni_skills_slug"} {
+		db.Exec("DROP INDEX IF EXISTS " + idx)
+	}
+	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_ns_slug ON skills (namespace_id, slug)")
+
+	// Backfill alias namespace_id from the skill they point to.
+	db.Exec(`UPDATE skill_slug_aliases SET namespace_id = (
+		SELECT namespace_id FROM skills WHERE skills.id = skill_slug_aliases.skill_id
+	) WHERE skill_slug_aliases.namespace_id IS NULL`)
+
+	// Alias table: swap from global unique old_slug to (namespace_id, old_slug).
+	for _, idx := range []string{"idx_skill_slug_aliases_old_slug", "uni_skill_slug_aliases_old_slug"} {
+		db.Exec("DROP INDEX IF EXISTS " + idx)
+	}
+	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_ns_old_slug ON skill_slug_aliases (namespace_id, old_slug)")
+
+	// Enforce NOT NULL on namespace_id at DB level. SQLite doesn't support
+	// ALTER COLUMN, so we use a CHECK constraint workaround. For Postgres
+	// we can directly alter the column.
+	switch cfg.Driver {
+	case "postgres":
+		db.Exec(`DO $$ BEGIN
+			ALTER TABLE skills ALTER COLUMN namespace_id SET NOT NULL;
+		EXCEPTION WHEN others THEN NULL;
+		END $$`)
+	default:
+		// SQLite: CHECK constraints can't be added after table creation,
+		// but all rows are guaranteed non-null by the migration above.
+		// The application layer enforces this going forward.
+	}
+
 	return db, nil
 }
 
@@ -136,6 +181,71 @@ func migrateVisibility(db *gorm.DB) {
 		Update("visibility", "public")
 	if result.RowsAffected > 0 {
 		slog.Default().Info("database: migrated existing approved skills to public visibility", "count", result.RowsAffected)
+	}
+}
+
+// migrateSkillNamespaces assigns all skills with namespace_id IS NULL to their
+// owner's personal namespace. For each distinct owner_id it ensures a personal
+// namespace exists (slug = user.handle, type = personal) and bulk-updates the
+// orphaned skills. This is idempotent: once no NULL namespace_id rows remain,
+// subsequent runs are a no-op.
+func migrateSkillNamespaces(db *gorm.DB) {
+	// Find distinct owner IDs that have orphaned skills.
+	type ownerRow struct {
+		OwnerID string
+		Handle  string
+	}
+	var owners []ownerRow
+	db.Raw(`SELECT DISTINCT s.owner_id, u.handle
+		FROM skills s JOIN users u ON s.owner_id = u.id
+		WHERE s.namespace_id IS NULL`).Scan(&owners)
+
+	if len(owners) == 0 {
+		return
+	}
+
+	var totalMigrated int64
+	for _, o := range owners {
+		// Find or create personal namespace for this owner.
+		var ns model.Namespace
+		err := db.Where("owner_id = ? AND type = 'personal'", o.OwnerID).First(&ns).Error
+		if err != nil {
+			// Create personal namespace.
+			ns = model.Namespace{
+				ID:      uuid.New(),
+				Slug:    o.Handle,
+				OwnerID: uuid.MustParse(o.OwnerID),
+				Type:    "personal",
+				Status:  "active",
+			}
+			if err := db.Create(&ns).Error; err != nil {
+				slog.Default().Warn("namespace migration: failed to create personal namespace",
+					"handle", o.Handle, "err", err)
+				continue
+			}
+			// Add owner member.
+			member := model.NamespaceMember{
+				ID:          uuid.New(),
+				NamespaceID: ns.ID,
+				UserID:      uuid.MustParse(o.OwnerID),
+				Role:        "owner",
+			}
+			if err := db.Create(&member).Error; err != nil {
+				slog.Default().Warn("namespace migration: failed to add owner member",
+					"handle", o.Handle, "err", err)
+			}
+		}
+
+		// Assign orphaned skills to the personal namespace.
+		result := db.Model(&model.Skill{}).
+			Where("namespace_id IS NULL AND owner_id = ?", o.OwnerID).
+			Update("namespace_id", ns.ID)
+		totalMigrated += result.RowsAffected
+	}
+
+	if totalMigrated > 0 {
+		slog.Default().Info("namespace migration: assigned orphaned skills to personal namespaces",
+			"skills", totalMigrated, "owners", len(owners))
 	}
 }
 

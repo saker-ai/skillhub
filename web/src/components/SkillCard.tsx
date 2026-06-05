@@ -8,18 +8,21 @@ interface Props {
   summary?: string;
   tags?: string[];
   ownerHandle: string;
+  namespaceSlug?: string;
   starsCount: number;
   downloads: number;
   updatedAt?: string;
 }
 
-export default function SkillCard({ slug, displayName, summary, tags, ownerHandle, starsCount, downloads, updatedAt }: Props) {
+export default function SkillCard({ slug, displayName, summary, tags, ownerHandle, namespaceSlug, starsCount, downloads, updatedAt }: Props) {
   const { t } = useTranslation();
   const initial = ownerHandle ? ownerHandle[0].toUpperCase() : '?';
   const title = formatDisplayName(displayName, slug, 48);
+  const ns = namespaceSlug || ownerHandle;
+  const linkPath = ns ? `/skills/@${ns}/${slug}` : `/skills/${slug}`;
 
   return (
-    <Link to={`/skills/${slug}`}>
+    <Link to={linkPath}>
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
           <div className="owner-avatar" style={{ width: 28, height: 28, fontSize: '0.7rem' }}>{initial}</div>
@@ -27,7 +30,7 @@ export default function SkillCard({ slug, displayName, summary, tags, ownerHandl
             <div className="card-title" style={{ marginBottom: 0 }} title={title.tooltip}>
               {title.text}
             </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{ownerHandle}/{slug}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>@{ns}/{slug}</div>
           </div>
         </div>
         <div className="card-summary">{summary || t('common.no_description')}</div>

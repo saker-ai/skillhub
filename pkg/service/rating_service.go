@@ -12,20 +12,29 @@ import (
 type RatingService struct {
 	ratingRepo *repository.RatingRepo
 	skillRepo  *repository.SkillRepo
+	nsSvc      *NamespaceService
 }
 
 func NewRatingService(ratingRepo *repository.RatingRepo, skillRepo *repository.SkillRepo) *RatingService {
 	return &RatingService{ratingRepo: ratingRepo, skillRepo: skillRepo}
 }
 
+// SetNamespaceService injects the namespace service for visibility checks.
+func (s *RatingService) SetNamespaceService(ns *NamespaceService) {
+	s.nsSvc = ns
+}
+
 // Rate creates or updates a rating for a skill.
-func (s *RatingService) Rate(ctx context.Context, userID uuid.UUID, slug string, score int, comment string) error {
+func (s *RatingService) Rate(ctx context.Context, userID uuid.UUID, ref model.SkillRef, score int, comment string) error {
 	if score < 1 || score > 5 {
 		return fmt.Errorf("score must be between 1 and 5")
 	}
 
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+	skill, err := resolveSkillRefWith(ctx, ref, s.skillRepo, s.nsSvc)
+	if err != nil {
+		return err
+	}
+	if skill == nil {
 		return fmt.Errorf("skill not found")
 	}
 
@@ -52,13 +61,16 @@ func (s *RatingService) Rate(ctx context.Context, userID uuid.UUID, slug string,
 }
 
 // GetRatings returns paginated ratings for a skill.
-func (s *RatingService) GetRatings(ctx context.Context, slug string, limit int, cursor string) ([]model.RatingWithUser, string, error) {
+func (s *RatingService) GetRatings(ctx context.Context, ref model.SkillRef, limit int, cursor string) ([]model.RatingWithUser, string, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+	skill, err := resolveSkillRefWith(ctx, ref, s.skillRepo, s.nsSvc)
+	if err != nil {
+		return nil, "", err
+	}
+	if skill == nil {
 		return nil, "", fmt.Errorf("skill not found")
 	}
 
@@ -66,9 +78,12 @@ func (s *RatingService) GetRatings(ctx context.Context, slug string, limit int, 
 }
 
 // DeleteRating removes a user's rating.
-func (s *RatingService) DeleteRating(ctx context.Context, userID uuid.UUID, slug string) error {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *RatingService) DeleteRating(ctx context.Context, userID uuid.UUID, ref model.SkillRef) error {
+	skill, err := resolveSkillRefWith(ctx, ref, s.skillRepo, s.nsSvc)
+	if err != nil {
+		return err
+	}
+	if skill == nil {
 		return fmt.Errorf("skill not found")
 	}
 

@@ -253,10 +253,12 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 	// Ratings
 	ratingRepo := repository.NewRatingRepo(db)
 	ratingSvc := service.NewRatingService(ratingRepo, skillRepo)
+	ratingSvc.SetNamespaceService(nsSvc)
 
 	// Comments
 	commentRepo := repository.NewCommentRepo(db)
 	commentSvc := service.NewCommentService(commentRepo, skillRepo, auditSvc)
+	commentSvc.SetNamespaceService(nsSvc)
 
 	// Rate Limiter
 	rateLimiter := middleware.NewRateLimiter(cfg.RateLimit)
@@ -306,6 +308,19 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 		go func() {
 			if err := mirrorSvc.PushAll(context.Background()); err != nil {
 				lg.Error("mirror push on startup failed", "err", err)
+			}
+		}()
+	}
+
+	// Rebuild search index on startup to backfill namespace data for
+	// existing documents. Async to avoid blocking server readiness.
+	if searchClient != nil {
+		go func() {
+			n, err := skillSvc.ReindexAll(context.Background())
+			if err != nil {
+				lg.Error("search reindex on startup failed", "err", err)
+			} else if n > 0 {
+				lg.Info("search reindex complete", "indexed", n)
 			}
 		}()
 	}

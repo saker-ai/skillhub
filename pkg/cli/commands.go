@@ -228,13 +228,24 @@ func Inspect(args []string) {
 	}
 }
 
+// localSlug extracts the bare slug from a ref like "@namespace/slug" → "slug".
+func localSlug(ref string) string {
+	if strings.HasPrefix(ref, "@") {
+		if idx := strings.IndexByte(ref[1:], '/'); idx > 0 {
+			return ref[idx+2:]
+		}
+	}
+	return ref
+}
+
 // Install downloads and installs a skill locally.
 func Install(args []string) {
 	if len(args) == 0 {
-		exitWithError("Usage: skillhub install <slug> [--version <version>]")
+		exitWithError("Usage: skillhub install <slug|@namespace/slug> [--version <version>]")
 	}
 
-	slug := args[0]
+	ref := args[0]
+	dirName := localSlug(ref)
 	version := "latest"
 	for i, a := range args {
 		if a == "--version" && i+1 < len(args) {
@@ -247,9 +258,9 @@ func Install(args []string) {
 		exitWithError(err.Error())
 	}
 
-	fmt.Printf("Downloading %s@%s...\n", slug, version)
+	fmt.Printf("Downloading %s@%s...\n", ref, version)
 
-	body, err := client.Download(slug, version)
+	body, err := client.Download(ref, version)
 	if err != nil {
 		exitWithError(err.Error())
 	}
@@ -262,7 +273,7 @@ func Install(args []string) {
 	}
 
 	// Create skill directory
-	skillDir := filepath.Join(loadSkillsDir(), slug)
+	skillDir := filepath.Join(loadSkillsDir(), dirName)
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		exitWithError(fmt.Sprintf("creating directory: %v", err))
 	}
@@ -328,13 +339,13 @@ func Install(args []string) {
 	meta := map[string]interface{}{
 		"version":     version,
 		"installedAt": time.Now().UTC().Format(time.RFC3339),
-		"slug":        slug,
+		"slug":        dirName,
+		"ref":         ref,
 	}
 	metaData, _ := json.MarshalIndent(meta, "", "  ")
-	// 元数据写失败不影响 skill 文件本身可用——只是后续 `list/upgrade` 会缺失版本信息。
 	_ = os.WriteFile(filepath.Join(skillDir, ".installed.json"), metaData, 0o644)
 
-	printSuccess(fmt.Sprintf("Installed %s@%s to %s", slug, version, skillDir))
+	printSuccess(fmt.Sprintf("Installed %s@%s to %s", ref, version, skillDir))
 }
 
 // Uninstall removes a locally installed skill.
@@ -455,12 +466,17 @@ func Update(args []string) {
 			continue
 		}
 		var meta map[string]interface{}
-		// 损坏的 .installed.json: getStr 对 nil map 返回 ""，下面的 currentVer 比较会跳过。
 		_ = json.Unmarshal(data, &meta)
 		currentVer := getStr(meta, "version")
 
+		// Use stored ref (e.g. "@namespace/slug") if available, fall back to dir name.
+		ref := getStr(meta, "ref")
+		if ref == "" {
+			ref = slug
+		}
+
 		// Get latest version info via versions endpoint
-		versions, err := client.GetVersions(slug)
+		versions, err := client.GetVersions(ref)
 		if err != nil {
 			fmt.Printf("  %s: failed to check (%v)\n", slug, err)
 			continue
@@ -482,8 +498,8 @@ func Update(args []string) {
 			continue
 		}
 
-		fmt.Printf("  %s: %s → %s, updating...\n", slug, currentVer, latestVer)
-		Install([]string{slug, "--version", latestVer})
+		fmt.Printf("  %s: %s → %s, updating...\n", ref, currentVer, latestVer)
+		Install([]string{ref, "--version", latestVer})
 		updated++
 	}
 

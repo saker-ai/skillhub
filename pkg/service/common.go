@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -12,6 +13,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cinience/skillhub/pkg/model"
+	"github.com/cinience/skillhub/pkg/repository"
 	"gorm.io/gorm"
 )
 
@@ -122,4 +125,66 @@ func sanitizeFilePath(name string) string {
 		return ""
 	}
 	return name
+}
+
+// resolveSkillRefWith is the shared SkillRef resolution logic usable by any
+// service that has a SkillRepo + NamespaceService. nsSvc may be nil (qualified
+// refs will fail).
+func resolveSkillRefWith(ctx context.Context, ref model.SkillRef, skillRepo *repository.SkillRepo, nsSvc *NamespaceService) (*model.SkillWithOwner, error) {
+	if ref.IsQualified() {
+		if nsSvc == nil {
+			return nil, nil
+		}
+		ns, err := nsSvc.GetBySlug(ctx, ref.Namespace)
+		if err != nil || ns == nil {
+			return nil, nil
+		}
+		return skillRepo.GetByNSAndSlug(ctx, ns.ID, ref.Slug)
+	}
+
+	all, err := skillRepo.GetBySlugGlobal(ctx, ref.Slug)
+	if err != nil {
+		return nil, err
+	}
+	switch len(all) {
+	case 0:
+		return skillRepo.GetBySlugOrAlias(ctx, ref.Slug)
+	case 1:
+		return &all[0], nil
+	default:
+		candidates := make([]AmbiguousCandidate, 0, len(all))
+		for i := range all {
+			candidates = append(candidates, AmbiguousCandidate{
+				Namespace:   all[i].NamespaceSlug,
+				Slug:        all[i].Slug,
+				OwnerHandle: all[i].OwnerHandle,
+				SkillID:     all[i].ID.String(),
+			})
+		}
+		return nil, &AmbiguousSlugError{Slug: ref.Slug, Candidates: candidates}
+	}
+}
+
+// canViewSkillWith is the shared visibility check used by CommentService,
+// RatingService, and any service that doesn't own SkillService but needs
+// to verify skill access. nsSvc may be nil (namespace member check skipped).
+func canViewSkillWith(ctx context.Context, skill *model.SkillWithOwner, viewer *model.User, nsSvc *NamespaceService) bool {
+	if skill.Visibility == "public" && skill.ModerationStatus == "approved" {
+		return true
+	}
+	if viewer == nil {
+		return false
+	}
+	if viewer.IsModerator() {
+		return true
+	}
+	if skill.OwnerID == viewer.ID {
+		return true
+	}
+	if skill.NamespaceID != nil && nsSvc != nil {
+		if nsSvc.IsMemberOrAdmin(ctx, *skill.NamespaceID, viewer) {
+			return true
+		}
+	}
+	return false
 }

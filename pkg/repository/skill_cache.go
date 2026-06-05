@@ -94,6 +94,16 @@ func (c *SkillCache) Invalidate(keys ...string) {
 	}
 }
 
+// InvalidateNS deletes namespace-qualified cache entries keyed as "ns:<nsID>:<slug>".
+func (c *SkillCache) InvalidateNS(nsID string, slugs ...string) {
+	if c == nil {
+		return
+	}
+	for _, slug := range slugs {
+		c.lru.Remove("ns:" + nsID + ":" + slug)
+	}
+}
+
 // Purge 清空整个缓存。仅供测试 / 运维场景使用，正常路径都走 Invalidate。
 func (c *SkillCache) Purge() {
 	if c == nil {

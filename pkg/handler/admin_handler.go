@@ -180,7 +180,6 @@ func (h *AdminHandler) ListAllSkills(c *gin.Context) {
 
 // ReviewSkill handles POST /api/v1/admin/skills/:slug/review
 func (h *AdminHandler) ReviewSkill(c *gin.Context) {
-	slug := c.Param("slug")
 	var req struct {
 		Action string `json:"action" binding:"required"` // "approve" or "reject"
 	}
@@ -200,7 +199,7 @@ func (h *AdminHandler) ReviewSkill(c *gin.Context) {
 		reviewerID = &admin.ID
 	}
 
-	if err := h.skillSvc.ReviewSkill(c.Request.Context(), reviewerID, slug, approve); err != nil {
+	if err := h.skillSvc.ReviewSkill(c.Request.Context(), reviewerID, extractSkillRef(c), approve); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -210,7 +209,6 @@ func (h *AdminHandler) ReviewSkill(c *gin.Context) {
 
 // SetVisibility handles POST /api/v1/admin/skills/:slug/visibility
 func (h *AdminHandler) SetVisibility(c *gin.Context) {
-	slug := c.Param("slug")
 	var req struct {
 		Visibility string `json:"visibility" binding:"required"` // "public" or "private"
 	}
@@ -224,7 +222,7 @@ func (h *AdminHandler) SetVisibility(c *gin.Context) {
 		adminID = &admin.ID
 	}
 
-	if err := h.skillSvc.SetSkillVisibility(c.Request.Context(), adminID, slug, req.Visibility); err != nil {
+	if err := h.skillSvc.SetSkillVisibility(c.Request.Context(), adminID, extractSkillRef(c), req.Visibility); err != nil {
 		writeServiceError(c, err)
 		return
 	}

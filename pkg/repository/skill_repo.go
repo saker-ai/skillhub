@@ -37,9 +37,17 @@ func (r *SkillRepo) InvalidateCache(slugs ...string) {
 	r.cache.Invalidate(slugs...)
 }
 
+// InvalidateCacheNS clears namespace-qualified cache entries.
+func (r *SkillRepo) InvalidateCacheNS(nsID string, slugs ...string) {
+	r.cache.InvalidateNS(nsID, slugs...)
+}
+
 func (r *SkillRepo) Create(ctx context.Context, skill *model.Skill) error {
 	return r.db.WithContext(ctx).Create(skill).Error
 }
+
+// skillWithOwnerSelect is the shared SELECT clause for all queries that return SkillWithOwner.
+const skillWithOwnerSelect = "skills.*, users.handle AS owner_handle, users.display_name AS owner_display_name, users.avatar_url AS owner_avatar_url, namespaces.slug AS namespace_slug"
 
 func (r *SkillRepo) GetBySlug(ctx context.Context, slug string) (*model.SkillWithOwner, error) {
 	if cached, ok := r.cache.Get(slug); ok {
@@ -48,13 +56,12 @@ func (r *SkillRepo) GetBySlug(ctx context.Context, slug string) (*model.SkillWit
 	var skill model.SkillWithOwner
 	err := r.db.WithContext(ctx).
 		Table("skills").
-		Select("skills.*, users.handle AS owner_handle, users.display_name AS owner_display_name, users.avatar_url AS owner_avatar_url").
+		Select(skillWithOwnerSelect).
 		Joins("JOIN users ON skills.owner_id = users.id").
+		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
 		Where("skills.slug = ? AND skills.soft_deleted_at IS NULL", slug).
 		First(&skill).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		// 不缓存"不存在"——下一秒可能就有人新发布同名 skill，
-		// 缓存负命中会让新 skill 在 TTL 内不可见。
 		return nil, nil
 	}
 	if err != nil {
@@ -62,6 +69,44 @@ func (r *SkillRepo) GetBySlug(ctx context.Context, slug string) (*model.SkillWit
 	}
 	r.cache.Set(slug, &skill)
 	return &skill, nil
+}
+
+// GetByNSAndSlug looks up a skill by its namespace ID and slug (compound unique key).
+func (r *SkillRepo) GetByNSAndSlug(ctx context.Context, namespaceID uuid.UUID, slug string) (*model.SkillWithOwner, error) {
+	cacheKey := "ns:" + namespaceID.String() + ":" + slug
+	if cached, ok := r.cache.Get(cacheKey); ok {
+		return cached, nil
+	}
+	var skill model.SkillWithOwner
+	err := r.db.WithContext(ctx).
+		Table("skills").
+		Select(skillWithOwnerSelect).
+		Joins("JOIN users ON skills.owner_id = users.id").
+		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
+		Where("skills.namespace_id = ? AND skills.slug = ? AND skills.soft_deleted_at IS NULL", namespaceID, slug).
+		First(&skill).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.cache.Set(cacheKey, &skill)
+	return &skill, nil
+}
+
+// GetBySlugGlobal returns all non-deleted skills matching a slug across all namespaces.
+// Used for disambiguation when a bare slug is ambiguous.
+func (r *SkillRepo) GetBySlugGlobal(ctx context.Context, slug string) ([]model.SkillWithOwner, error) {
+	var skills []model.SkillWithOwner
+	err := r.db.WithContext(ctx).
+		Table("skills").
+		Select(skillWithOwnerSelect).
+		Joins("JOIN users ON skills.owner_id = users.id").
+		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
+		Where("skills.slug = ? AND skills.soft_deleted_at IS NULL", slug).
+		Find(&skills).Error
+	return skills, err
 }
 
 func (r *SkillRepo) GetBySlugOrAlias(ctx context.Context, slug string) (*model.SkillWithOwner, error) {
@@ -86,8 +131,9 @@ func (r *SkillRepo) GetBySlugOrAlias(ctx context.Context, slug string) (*model.S
 	var s model.SkillWithOwner
 	err = r.db.WithContext(ctx).
 		Table("skills").
-		Select("skills.*, users.handle AS owner_handle, users.display_name AS owner_display_name, users.avatar_url AS owner_avatar_url").
+		Select(skillWithOwnerSelect).
 		Joins("JOIN users ON skills.owner_id = users.id").
+		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
 		Where("skills.id = ? AND skills.soft_deleted_at IS NULL", alias.SkillID).
 		First(&s).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -113,9 +159,10 @@ func (r *SkillRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Skill, er
 
 // ListFilter controls visibility filtering for skill listing.
 type ListFilter struct {
-	ViewerID *uuid.UUID // nil = anonymous
-	IsAdmin  bool       // admin/moderator sees all
-	Category string     // filter by category (empty = all)
+	ViewerID    *uuid.UUID // nil = anonymous
+	IsAdmin     bool       // admin/moderator sees all
+	Category    string     // filter by category (empty = all)
+	NamespaceID *uuid.UUID // nil = all namespaces
 }
 
 func (r *SkillRepo) List(ctx context.Context, limit int, cursor string, sort string, filter ListFilter) ([]model.SkillWithOwner, string, error) {
@@ -133,8 +180,9 @@ func (r *SkillRepo) List(ctx context.Context, limit int, cursor string, sort str
 
 	q := r.db.WithContext(ctx).
 		Table("skills").
-		Select("skills.*, users.handle AS owner_handle, users.display_name AS owner_display_name, users.avatar_url AS owner_avatar_url").
+		Select(skillWithOwnerSelect).
 		Joins("JOIN users ON skills.owner_id = users.id").
+		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
 		Where("skills.soft_deleted_at IS NULL")
 
 	if filter.IsAdmin {
@@ -145,6 +193,10 @@ func (r *SkillRepo) List(ctx context.Context, limit int, cursor string, sort str
 	} else {
 		// Anonymous: only public+approved
 		q = q.Where("skills.visibility = 'public' AND skills.moderation_status = 'approved'")
+	}
+
+	if filter.NamespaceID != nil {
+		q = q.Where("skills.namespace_id = ?", *filter.NamespaceID)
 	}
 
 	if filter.Category != "" {
@@ -185,8 +237,9 @@ func (r *SkillRepo) List(ctx context.Context, limit int, cursor string, sort str
 func (r *SkillRepo) ListAllForAdmin(ctx context.Context, limit int, cursor, visibility string) ([]model.SkillWithOwner, string, error) {
 	q := r.db.WithContext(ctx).
 		Table("skills").
-		Select("skills.*, users.handle AS owner_handle, users.display_name AS owner_display_name, users.avatar_url AS owner_avatar_url").
+		Select(skillWithOwnerSelect).
 		Joins("JOIN users ON skills.owner_id = users.id").
+		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
 		Where("skills.soft_deleted_at IS NULL")
 
 	switch visibility {
@@ -299,8 +352,9 @@ func (r *SkillRepo) GetBySlugIncludeDeleted(ctx context.Context, slug string) (*
 	var skill model.SkillWithOwner
 	err := r.db.WithContext(ctx).
 		Table("skills").
-		Select("skills.*, users.handle AS owner_handle").
+		Select(skillWithOwnerSelect).
 		Joins("JOIN users ON skills.owner_id = users.id").
+		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
 		Where("skills.slug = ?", slug).
 		First(&skill).Error
 	if err != nil {
@@ -345,16 +399,17 @@ func (r *SkillRepo) Update(ctx context.Context, skill *model.Skill) error {
 		}).Error
 }
 
-func (r *SkillRepo) Rename(ctx context.Context, skillID uuid.UUID, oldSlug, newSlug string) error {
+func (r *SkillRepo) Rename(ctx context.Context, skillID uuid.UUID, namespaceID *uuid.UUID, oldSlug, newSlug string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.Skill{}).Where("id = ?", skillID).
 			Update("slug", newSlug).Error; err != nil {
 			return fmt.Errorf("rename skill: %w", err)
 		}
 		alias := model.SkillSlugAlias{
-			ID:      uuid.New(),
-			SkillID: skillID,
-			OldSlug: oldSlug,
+			ID:          uuid.New(),
+			SkillID:     skillID,
+			NamespaceID: namespaceID,
+			OldSlug:     oldSlug,
 		}
 		return tx.Create(&alias).Error
 	})

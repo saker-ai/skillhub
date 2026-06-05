@@ -20,14 +20,14 @@ func NewCommentHandler(svc *service.CommentService) *CommentHandler {
 
 // List handles GET /api/v1/skills/:slug/comments
 func (h *CommentHandler) List(c *gin.Context) {
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 	viewer := middleware.GetUser(c)
 	limit := 20
 	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 100 {
 		limit = l
 	}
 	cursor := c.Query("cursor")
-	rows, nextCursor, err := h.svc.List(c.Request.Context(), viewer, slug, limit, cursor)
+	rows, nextCursor, err := h.svc.List(c.Request.Context(), viewer, ref, limit, cursor)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -52,7 +52,7 @@ func (h *CommentHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	comment, err := h.svc.Create(c.Request.Context(), user, c.Param("slug"), req.Body)
+	comment, err := h.svc.Create(c.Request.Context(), user, extractSkillRef(c), req.Body)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

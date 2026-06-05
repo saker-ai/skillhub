@@ -18,6 +18,7 @@ type CommentService struct {
 	commentRepo *repository.CommentRepo
 	skillRepo   *repository.SkillRepo
 	auditSvc    *AuditService
+	nsSvc       *NamespaceService
 }
 
 func NewCommentService(commentRepo *repository.CommentRepo, skillRepo *repository.SkillRepo, auditSvc *AuditService) *CommentService {
@@ -28,9 +29,18 @@ func NewCommentService(commentRepo *repository.CommentRepo, skillRepo *repositor
 	}
 }
 
+// SetNamespaceService injects the namespace service for visibility checks.
+func (s *CommentService) SetNamespaceService(ns *NamespaceService) {
+	s.nsSvc = ns
+}
+
+func (s *CommentService) canViewSkill(ctx context.Context, skill *model.SkillWithOwner, viewer *model.User) bool {
+	return canViewSkillWith(ctx, skill, viewer, s.nsSvc)
+}
+
 // Create posts a new comment on a skill. The skill must be visible to the
 // commenter (private skills only allow owner/admin/moderator comments).
-func (s *CommentService) Create(ctx context.Context, user *model.User, slug, body string) (*model.Comment, error) {
+func (s *CommentService) Create(ctx context.Context, user *model.User, ref model.SkillRef, body string) (*model.Comment, error) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return nil, fmt.Errorf("comment body is required")
@@ -38,11 +48,14 @@ func (s *CommentService) Create(ctx context.Context, user *model.User, slug, bod
 	if len(body) > maxCommentLen {
 		return nil, fmt.Errorf("comment exceeds %d characters", maxCommentLen)
 	}
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+	skill, err := resolveSkillRefWith(ctx, ref, s.skillRepo, s.nsSvc)
+	if err != nil {
+		return nil, err
+	}
+	if skill == nil {
 		return nil, fmt.Errorf("skill not found")
 	}
-	if !canViewSkill(skill, user) {
+	if !s.canViewSkill(ctx, skill, user) {
 		return nil, fmt.Errorf("skill not found")
 	}
 	c := &model.Comment{
@@ -61,12 +74,15 @@ func (s *CommentService) Create(ctx context.Context, user *model.User, slug, bod
 }
 
 // List returns paginated comments for a skill (newest first).
-func (s *CommentService) List(ctx context.Context, viewer *model.User, slug string, limit int, cursor string) ([]model.CommentWithUser, string, error) {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *CommentService) List(ctx context.Context, viewer *model.User, ref model.SkillRef, limit int, cursor string) ([]model.CommentWithUser, string, error) {
+	skill, err := resolveSkillRefWith(ctx, ref, s.skillRepo, s.nsSvc)
+	if err != nil {
+		return nil, "", err
+	}
+	if skill == nil {
 		return nil, "", fmt.Errorf("skill not found")
 	}
-	if !canViewSkill(skill, viewer) {
+	if !s.canViewSkill(ctx, skill, viewer) {
 		return nil, "", fmt.Errorf("skill not found")
 	}
 	if limit <= 0 || limit > 100 {

@@ -15,6 +15,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// extractSkillRef builds a SkillRef from Gin path params.
+// For namespace-qualified routes (/skills/@:namespace/:slug) it strips the "@" prefix.
+// For legacy routes (/skills/:slug) it returns a bare ref.
+func extractSkillRef(c *gin.Context) model.SkillRef {
+	ns := c.Param("namespace")
+	slug := c.Param("slug")
+	if ns != "" {
+		return model.SkillRef{Namespace: strings.TrimPrefix(ns, "@"), Slug: slug}
+	}
+	return model.SkillRef{Slug: slug}
+}
+
 type SkillHandler struct {
 	svc    *service.SkillService
 	logger *slog.Logger
@@ -47,8 +59,9 @@ func (h *SkillHandler) List(c *gin.Context) {
 	}
 
 	category := c.Query("category")
+	namespace := c.Query("namespace")
 	viewer := middleware.GetUser(c)
-	skills, nextCursor, err := h.svc.ListSkills(c.Request.Context(), limit, cursor, sort, category, viewer)
+	skills, nextCursor, err := h.svc.ListSkills(c.Request.Context(), limit, cursor, sort, category, namespace, viewer)
 	if err != nil {
 		h.loggerOrDefault().Error("ListSkills error", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
@@ -61,14 +74,38 @@ func (h *SkillHandler) List(c *gin.Context) {
 	})
 }
 
-// Get handles GET /api/v1/skills/:slug
-func (h *SkillHandler) Get(c *gin.Context) {
-	slug := c.Param("slug")
+// ListByNamespace handles GET /api/v1/namespaces/:slug/skills
+func (h *SkillHandler) ListByNamespace(c *gin.Context) {
+	nsSlug := c.Param("slug")
+	cursor := c.Query("cursor")
+	sort := c.DefaultQuery("sort", "created")
+	limit := 20
+	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+	category := c.Query("category")
 	viewer := middleware.GetUser(c)
-	skill, err := h.svc.GetSkill(c.Request.Context(), slug, viewer)
+
+	skills, nextCursor, err := h.svc.ListSkills(c.Request.Context(), limit, cursor, sort, category, nsSlug, viewer)
 	if err != nil {
-		h.loggerOrDefault().Error("GetSkill error", "err", err)
+		h.loggerOrDefault().Error("ListByNamespace error", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":       skills,
+		"nextCursor": nextCursor,
+	})
+}
+
+// Get handles GET /api/v1/skills/:slug and GET /api/v1/skills/@:namespace/:slug
+func (h *SkillHandler) Get(c *gin.Context) {
+	ref := extractSkillRef(c)
+	viewer := middleware.GetUser(c)
+	skill, err := h.svc.GetSkill(c.Request.Context(), ref, viewer)
+	if err != nil {
+		writeServiceError(c, err)
 		return
 	}
 	if skill == nil {
@@ -151,9 +188,9 @@ func (h *SkillHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 
-	if err := h.svc.SoftDelete(c.Request.Context(), user, slug, middleware.GetTokenNamespace(c)); err != nil {
+	if err := h.svc.SoftDelete(c.Request.Context(), user, ref, middleware.GetTokenNamespace(c)); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -167,8 +204,8 @@ func (h *SkillHandler) Purge(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	slug := c.Param("slug")
-	if err := h.svc.PurgeBySlug(c.Request.Context(), user, slug); err != nil {
+	ref := extractSkillRef(c)
+	if err := h.svc.PurgeByRef(c.Request.Context(), user, ref); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -182,9 +219,9 @@ func (h *SkillHandler) Undelete(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 
-	if err := h.svc.Undelete(c.Request.Context(), user, slug, middleware.GetTokenNamespace(c)); err != nil {
+	if err := h.svc.Undelete(c.Request.Context(), user, ref, middleware.GetTokenNamespace(c)); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -194,9 +231,9 @@ func (h *SkillHandler) Undelete(c *gin.Context) {
 
 // Versions handles GET /api/v1/skills/:slug/versions
 func (h *SkillHandler) Versions(c *gin.Context) {
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 	viewer := middleware.GetUser(c)
-	versions, err := h.svc.GetVersions(c.Request.Context(), slug, viewer)
+	versions, err := h.svc.GetVersions(c.Request.Context(), ref, viewer)
 	if err != nil {
 		h.loggerOrDefault().Error("GetVersions error", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
@@ -207,11 +244,11 @@ func (h *SkillHandler) Versions(c *gin.Context) {
 
 // Version handles GET /api/v1/skills/:slug/versions/:version
 func (h *SkillHandler) Version(c *gin.Context) {
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 	ver := c.Param("version")
 	viewer := middleware.GetUser(c)
 
-	version, err := h.svc.GetVersion(c.Request.Context(), slug, ver, viewer)
+	version, err := h.svc.GetVersion(c.Request.Context(), ref, ver, viewer)
 	if err != nil {
 		writeInternalError(c, "get_skill_version", err)
 		return
@@ -225,7 +262,7 @@ func (h *SkillHandler) Version(c *gin.Context) {
 
 // GetFile handles GET /api/v1/skills/:slug/file
 func (h *SkillHandler) GetFile(c *gin.Context) {
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 	version := c.DefaultQuery("version", "latest")
 	path := c.Query("path")
 	if path == "" {
@@ -233,7 +270,7 @@ func (h *SkillHandler) GetFile(c *gin.Context) {
 	}
 	viewer := middleware.GetUser(c)
 
-	content, err := h.svc.GetFile(c.Request.Context(), slug, version, path, viewer)
+	content, err := h.svc.GetFile(c.Request.Context(), ref, version, path, viewer)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -260,7 +297,7 @@ func (h *SkillHandler) YankVersion(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.YankVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), req.Reason, middleware.GetTokenNamespace(c)); err != nil {
+	if err := h.svc.YankVersion(c.Request.Context(), user, extractSkillRef(c), c.Param("version"), req.Reason, middleware.GetTokenNamespace(c)); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -274,7 +311,7 @@ func (h *SkillHandler) UnyankVersion(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	if err := h.svc.UnyankVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), middleware.GetTokenNamespace(c)); err != nil {
+	if err := h.svc.UnyankVersion(c.Request.Context(), user, extractSkillRef(c), c.Param("version"), middleware.GetTokenNamespace(c)); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -298,7 +335,7 @@ func (h *SkillHandler) DeprecateVersion(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.DeprecateVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), req.Message, middleware.GetTokenNamespace(c)); err != nil {
+	if err := h.svc.DeprecateVersion(c.Request.Context(), user, extractSkillRef(c), c.Param("version"), req.Message, middleware.GetTokenNamespace(c)); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -312,7 +349,7 @@ func (h *SkillHandler) UndeprecateVersion(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	if err := h.svc.UndeprecateVersion(c.Request.Context(), user, c.Param("slug"), c.Param("version"), middleware.GetTokenNamespace(c)); err != nil {
+	if err := h.svc.UndeprecateVersion(c.Request.Context(), user, extractSkillRef(c), c.Param("version"), middleware.GetTokenNamespace(c)); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -326,14 +363,88 @@ func (h *SkillHandler) RequestPublic(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 
-	if err := h.svc.RequestPublic(c.Request.Context(), user, slug); err != nil {
+	if err := h.svc.RequestPublic(c.Request.Context(), user, ref); err != nil {
 		writeServiceError(c, err)
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "public review requested"})
+}
+
+// UpdateFile handles PUT /api/v1/skills/:slug/file and PUT /api/v1/skills/@:namespace/:slug/file
+func (h *SkillHandler) UpdateFile(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	ref := extractSkillRef(c)
+	var filePath string
+	var content []byte
+	var changelog string
+
+	ct := c.ContentType()
+	if strings.HasPrefix(ct, "multipart/") {
+		filePath = c.PostForm("path")
+		changelog = c.PostForm("changelog")
+		fh, err := c.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+			return
+		}
+		f, err := fh.Open()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read file"})
+			return
+		}
+		defer f.Close()
+		content, err = io.ReadAll(io.LimitReader(f, 200*1024+1))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "read error"})
+			return
+		}
+		if len(content) > 200*1024 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file exceeds 200KB"})
+			return
+		}
+	} else {
+		var req struct {
+			Path      string `json:"path"`
+			Content   string `json:"content"`
+			Changelog string `json:"changelog"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		filePath = req.Path
+		content = []byte(req.Content)
+		changelog = req.Changelog
+	}
+
+	if filePath == "" {
+		filePath = "SKILL.md"
+	}
+
+	skill, version, err := h.svc.UpdateFile(c.Request.Context(), user, service.UpdateFileRequest{
+		Ref:            ref,
+		Path:           filePath,
+		Content:        content,
+		Changelog:      changelog,
+		TokenNamespace: middleware.GetTokenNamespace(c),
+	})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"skill":   skill,
+		"version": version,
+	})
 }
 
 func splitTags(s string) []string {
@@ -347,4 +458,9 @@ func splitTags(s string) []string {
 		}
 	}
 	return tags
+}
+
+// Categories returns the list of valid skill categories.
+func (h *SkillHandler) Categories(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"categories": model.ValidCategories})
 }

@@ -8,14 +8,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// NOTE: All public methods in this file take model.SkillRef instead of slug string.
+
 // YankVersion marks a version as yanked. Yanked versions remain installable
 // by exact pin (so existing lockfiles keep working) but are excluded from
 // "latest" resolution. After yank, the skill's latest pointer is repointed
 // to the most recent non-yanked version.
 //
 // 写权限：tokenNS 非 nil ⇒ 必须 skill 隶属同 namespace；nil ⇒ owner 或系统 admin。
-func (s *SkillService) YankVersion(ctx context.Context, user *model.User, slug, version, reason string, tokenNS *uuid.UUID) error {
-	skill, ver, err := s.lookupOwnedVersion(ctx, user, slug, version, tokenNS)
+func (s *SkillService) YankVersion(ctx context.Context, user *model.User, ref model.SkillRef, version, reason string, tokenNS *uuid.UUID) error {
+	skill, ver, err := s.lookupOwnedVersion(ctx, user, ref, version, tokenNS)
 	if err != nil {
 		return err
 	}
@@ -29,7 +31,7 @@ func (s *SkillService) YankVersion(ctx context.Context, user *model.User, slug, 
 		return fmt.Errorf("repoint latest: %w", err)
 	}
 	// repointLatest 改了 latest_version_id,失效缓存让 GetBySlug 拿到新值。
-	s.skillRepo.InvalidateCache(skill.Slug)
+	s.invalidateSkillCache(skill)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, &user.ID, "yank", "skill_version", &ver.ID, "", reason)
 	}
@@ -38,8 +40,8 @@ func (s *SkillService) YankVersion(ctx context.Context, user *model.User, slug, 
 
 // UnyankVersion clears the yank flag, making the version eligible for latest
 // resolution again. tokenNS 语义同 YankVersion。
-func (s *SkillService) UnyankVersion(ctx context.Context, user *model.User, slug, version string, tokenNS *uuid.UUID) error {
-	skill, ver, err := s.lookupOwnedVersion(ctx, user, slug, version, tokenNS)
+func (s *SkillService) UnyankVersion(ctx context.Context, user *model.User, ref model.SkillRef, version string, tokenNS *uuid.UUID) error {
+	skill, ver, err := s.lookupOwnedVersion(ctx, user, ref, version, tokenNS)
 	if err != nil {
 		return err
 	}
@@ -53,7 +55,7 @@ func (s *SkillService) UnyankVersion(ctx context.Context, user *model.User, slug
 	if err := s.repointLatest(ctx, skill.ID, uuid.Nil); err != nil {
 		return fmt.Errorf("repoint latest: %w", err)
 	}
-	s.skillRepo.InvalidateCache(skill.Slug)
+	s.invalidateSkillCache(skill)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, &user.ID, "unyank", "skill_version", &ver.ID, "", "")
 	}
@@ -62,8 +64,8 @@ func (s *SkillService) UnyankVersion(ctx context.Context, user *model.User, slug
 
 // DeprecateVersion attaches a deprecation notice. The version still resolves
 // as latest if it would otherwise — deprecation is advisory, not exclusion.
-func (s *SkillService) DeprecateVersion(ctx context.Context, user *model.User, slug, version, message string, tokenNS *uuid.UUID) error {
-	_, ver, err := s.lookupOwnedVersion(ctx, user, slug, version, tokenNS)
+func (s *SkillService) DeprecateVersion(ctx context.Context, user *model.User, ref model.SkillRef, version, message string, tokenNS *uuid.UUID) error {
+	_, ver, err := s.lookupOwnedVersion(ctx, user, ref, version, tokenNS)
 	if err != nil {
 		return err
 	}
@@ -77,8 +79,8 @@ func (s *SkillService) DeprecateVersion(ctx context.Context, user *model.User, s
 }
 
 // UndeprecateVersion clears the deprecation notice.
-func (s *SkillService) UndeprecateVersion(ctx context.Context, user *model.User, slug, version string, tokenNS *uuid.UUID) error {
-	_, ver, err := s.lookupOwnedVersion(ctx, user, slug, version, tokenNS)
+func (s *SkillService) UndeprecateVersion(ctx context.Context, user *model.User, ref model.SkillRef, version string, tokenNS *uuid.UUID) error {
+	_, ver, err := s.lookupOwnedVersion(ctx, user, ref, version, tokenNS)
 	if err != nil {
 		return err
 	}
@@ -96,9 +98,12 @@ func (s *SkillService) UndeprecateVersion(ctx context.Context, user *model.User,
 
 // lookupOwnedVersion resolves slug+version and verifies the actor may write,
 // taking into account both legacy ownership and team-token namespace scoping.
-func (s *SkillService) lookupOwnedVersion(ctx context.Context, user *model.User, slug, version string, tokenNS *uuid.UUID) (*model.SkillWithOwner, *model.SkillVersion, error) {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *SkillService) lookupOwnedVersion(ctx context.Context, user *model.User, ref model.SkillRef, version string, tokenNS *uuid.UUID) (*model.SkillWithOwner, *model.SkillVersion, error) {
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
+		return nil, nil, err
+	}
+	if skill == nil {
 		return nil, nil, fmt.Errorf("skill not found")
 	}
 	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {

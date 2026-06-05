@@ -25,7 +25,7 @@ func (h *RatingHandler) Rate(c *gin.Context) {
 		return
 	}
 
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 	var req struct {
 		Score   int    `json:"score" binding:"required"`
 		Comment string `json:"comment"`
@@ -35,7 +35,7 @@ func (h *RatingHandler) Rate(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.Rate(c.Request.Context(), user.ID, slug, req.Score, req.Comment); err != nil {
+	if err := h.svc.Rate(c.Request.Context(), user.ID, ref, req.Score, req.Comment); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -45,14 +45,14 @@ func (h *RatingHandler) Rate(c *gin.Context) {
 
 // List handles GET /api/v1/skills/:slug/ratings
 func (h *RatingHandler) List(c *gin.Context) {
-	slug := c.Param("slug")
+	ref := extractSkillRef(c)
 	limit := 20
 	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 100 {
 		limit = l
 	}
 	cursor := c.Query("cursor")
 
-	ratings, nextCursor, err := h.svc.GetRatings(c.Request.Context(), slug, limit, cursor)
+	ratings, nextCursor, err := h.svc.GetRatings(c.Request.Context(), ref, limit, cursor)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -72,8 +72,8 @@ func (h *RatingHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	slug := c.Param("slug")
-	if err := h.svc.DeleteRating(c.Request.Context(), user.ID, slug); err != nil {
+	ref := extractSkillRef(c)
+	if err := h.svc.DeleteRating(c.Request.Context(), user.ID, ref); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

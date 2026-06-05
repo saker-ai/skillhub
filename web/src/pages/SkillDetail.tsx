@@ -1,11 +1,19 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { getSkill, getVersions, getFile, type Skill, type SkillVersion } from '../api/skills';
+import { ApiError } from '../api/client';
 import CodeBlock from '../components/CodeBlock';
 import { formatDisplayName } from '../utils/displayName';
+
+interface AmbiguousCandidate {
+  namespace: string;
+  slug: string;
+  ownerHandle: string;
+  skillId: string;
+}
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -18,40 +26,68 @@ type DocTab = 'readme' | 'skill';
 
 export default function SkillDetail() {
   const { t } = useTranslation();
-  const { slug } = useParams<{ slug: string }>();
+  const { slug, namespace } = useParams<{ slug: string; namespace?: string }>();
+  const ns = namespace?.replace(/^@/, '');
   const [skill, setSkill] = useState<Skill | null>(null);
   const [versions, setVersions] = useState<SkillVersion[]>([]);
   const [skillMd, setSkillMd] = useState('');
   const [readmeMd, setReadmeMd] = useState('');
   const [activeTab, setActiveTab] = useState<DocTab>('skill');
   const [notFound, setNotFound] = useState(false);
+  const [candidates, setCandidates] = useState<AmbiguousCandidate[]>([]);
 
   useEffect(() => {
     if (!slug) return;
-    getSkill(slug)
+    setCandidates([]);
+    getSkill(slug, ns)
       .then(r => setSkill(r))
-      .catch(() => setNotFound(true));
-    getVersions(slug)
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 409 && Array.isArray(err.body.candidates)) {
+          setCandidates(err.body.candidates as AmbiguousCandidate[]);
+        } else {
+          setNotFound(true);
+        }
+      });
+    getVersions(slug, ns)
       .then(r => setVersions(r.versions ?? []))
       .catch(e => console.error('Failed to load skill data:', e));
 
-    // Fetch SKILL.md (the canonical spec, frontmatter stripped) and
-    // README.md (free-form long-form docs) in parallel. README wins as
-    // the default tab when present — it is the human-facing landing page.
-    getFile(slug, 'latest', 'SKILL.md')
+    getFile(slug, 'latest', 'SKILL.md', ns)
       .then(async res => {
         if (!res.ok) return;
         setSkillMd(stripFrontmatter(await res.text()));
       })
       .catch(e => console.error('Failed to load SKILL.md:', e));
-    getFile(slug, 'latest', 'README.md')
+    getFile(slug, 'latest', 'README.md', ns)
       .then(async res => {
         if (!res.ok) return;
         setReadmeMd(await res.text());
         setActiveTab('readme');
       })
       .catch(() => { /* README.md is optional */ });
-  }, [slug]);
+  }, [slug, ns]);
+
+  if (candidates.length > 0) {
+    return (
+      <section style={{ padding: '40px 0' }}>
+        <div className="container" style={{ maxWidth: 640, margin: '0 auto' }}>
+          <h2 style={{ marginBottom: 16 }}>Ambiguous skill name</h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>
+            The slug <strong>{slug}</strong> exists in multiple namespaces. Select one:
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {candidates.map(c => (
+              <Link key={c.skillId} to={`/skills/@${c.namespace}/${c.slug}`}
+                style={{ padding: '16px 20px', border: '1px solid var(--border)', borderRadius: 8, textDecoration: 'none', color: 'inherit' }}>
+                <div style={{ fontWeight: 600, fontFamily: 'monospace' }}>@{c.namespace}/{c.slug}</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4 }}>by {c.ownerHandle}</div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   if (notFound) {
     return (
@@ -86,7 +122,7 @@ export default function SkillDetail() {
             {title.text}
           </h1>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12, fontFamily: 'monospace' }}>
-            {skill.ownerHandle}/{skill.slug}
+            @{skill.namespaceSlug || skill.ownerHandle}/{skill.slug}
           </div>
           {skill.summary && <p className="detail-summary">{skill.summary}</p>}
           <div className="detail-stats">
@@ -167,7 +203,7 @@ export default function SkillDetail() {
                 <>
                   <div className="sidebar-section">
                     <div className="sidebar-label">{t('detail.install')}</div>
-                    <CodeBlock command={`skillhub install ${skill.slug}`} style={{ padding: '10px 14px', fontSize: '0.8rem' }} />
+                    <CodeBlock command={`skillhub install @${skill.namespaceSlug || skill.ownerHandle}/${skill.slug}`} style={{ padding: '10px 14px', fontSize: '0.8rem' }} />
                   </div>
                   <div className="sidebar-section">
                     <div className="sidebar-label">{t('detail.latest_version')}</div>
@@ -192,7 +228,7 @@ export default function SkillDetail() {
               </div>
               {latestVersion && (
                 <div className="sidebar-section">
-                  <a href={`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/v1/download?slug=${skill.slug}&version=${latestVersion.version}`} className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
+                  <a href={`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/v1/download?slug=${skill.slug}&namespace=${skill.namespaceSlug || ''}&version=${latestVersion.version}`} className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
                     &#8615; {t('detail.download_zip')}
                   </a>
                 </div>

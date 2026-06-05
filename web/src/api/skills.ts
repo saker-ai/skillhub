@@ -11,6 +11,7 @@ export interface Skill {
   starsCount: number;
   versionsCount: number;
   ownerHandle: string;
+  namespaceSlug: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -28,29 +29,35 @@ export interface SkillListResponse {
   nextCursor: string;
 }
 
-export function listSkills(limit = 20, cursor = '', sort = 'created'): Promise<SkillListResponse> {
+export function listSkills(limit = 20, cursor = '', sort = 'created', namespace = ''): Promise<SkillListResponse> {
   const params = new URLSearchParams({ limit: String(limit), sort });
   if (cursor) params.set('cursor', cursor);
+  if (namespace) params.set('namespace', namespace);
   return apiFetch(`/skills?${params}`);
 }
 
-export function getSkill(slug: string): Promise<Skill> {
-  return apiFetch(`/skills/${slug}`);
+function skillPath(slug: string, namespace?: string): string {
+  if (namespace) return `/skills/@${namespace}/${slug}`;
+  return `/skills/${slug}`;
 }
 
-export function getVersions(slug: string): Promise<{ versions: SkillVersion[] }> {
-  return apiFetch(`/skills/${slug}/versions`);
+export function getSkill(slug: string, namespace?: string): Promise<Skill> {
+  return apiFetch(skillPath(slug, namespace));
 }
 
-export function getFile(slug: string, version: string, path: string): Promise<Response> {
+export function getVersions(slug: string, namespace?: string): Promise<{ versions: SkillVersion[] }> {
+  return apiFetch(`${skillPath(slug, namespace)}/versions`);
+}
+
+export function getFile(slug: string, version: string, path: string, namespace?: string): Promise<Response> {
   const params = new URLSearchParams({ version, path });
-  return apiFetchRaw(`/skills/${slug}/file?${params}`);
+  return apiFetchRaw(`${skillPath(slug, namespace)}/file?${params}`);
 }
 
 export function publishSkill(formData: FormData): Promise<{ skill: Skill; version: SkillVersion }> {
   return apiFetch('/skills', { method: 'POST', body: formData });
 }
 
-export function deleteSkill(slug: string): Promise<void> {
-  return apiFetch(`/skills/${slug}`, { method: 'DELETE' });
+export function deleteSkill(slug: string, namespace?: string): Promise<void> {
+  return apiFetch(skillPath(slug, namespace), { method: 'DELETE' });
 }

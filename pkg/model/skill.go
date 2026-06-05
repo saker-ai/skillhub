@@ -8,7 +8,7 @@ import (
 
 type Skill struct {
 	ID               uuid.UUID   `gorm:"column:id;type:text;primaryKey" json:"id"`
-	Slug             string      `gorm:"column:slug;type:varchar(128);uniqueIndex;not null" json:"slug"`
+	Slug             string      `gorm:"column:slug;type:varchar(128);not null" json:"slug"`
 	DisplayName      *string     `gorm:"column:display_name;type:varchar(256)" json:"displayName,omitempty"`
 	Summary          *string     `gorm:"column:summary;type:text" json:"summary,omitempty"`
 	OwnerID          uuid.UUID   `gorm:"column:owner_id;type:text;not null;index" json:"ownerId"`
@@ -40,14 +40,18 @@ type SkillWithOwner struct {
 	OwnerHandle      string  `gorm:"column:owner_handle" json:"ownerHandle"`
 	OwnerDisplayName *string `gorm:"column:owner_display_name" json:"ownerDisplayName,omitempty"`
 	OwnerAvatarURL   *string `gorm:"column:owner_avatar_url" json:"ownerAvatarUrl,omitempty"`
+	NamespaceSlug    string  `gorm:"column:namespace_slug" json:"namespaceSlug"`
 }
 
 // SkillSlugAlias for slug rename redirects.
+// The (namespace_id, old_slug) pair is unique so different namespaces
+// can independently rename skills without collision.
 type SkillSlugAlias struct {
-	ID        uuid.UUID `gorm:"column:id;type:text;primaryKey" json:"id"`
-	SkillID   uuid.UUID `gorm:"column:skill_id;type:text;not null;index" json:"skillId"`
-	OldSlug   string    `gorm:"column:old_slug;type:varchar(128);uniqueIndex;not null" json:"oldSlug"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
+	ID          uuid.UUID  `gorm:"column:id;type:text;primaryKey" json:"id"`
+	SkillID     uuid.UUID  `gorm:"column:skill_id;type:text;not null;index" json:"skillId"`
+	NamespaceID *uuid.UUID `gorm:"column:namespace_id;type:text" json:"namespaceId,omitempty"`
+	OldSlug     string     `gorm:"column:old_slug;type:varchar(128);not null" json:"oldSlug"`
+	CreatedAt   time.Time  `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
 }
 
 func (SkillSlugAlias) TableName() string { return "skill_slug_aliases" }

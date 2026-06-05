@@ -71,6 +71,7 @@ export default function Search() {
                 summary={hit.summary}
                 tags={hit.tags}
                 ownerHandle={hit.ownerHandle || ''}
+                namespaceSlug={hit.namespaceSlug}
                 starsCount={hit.stars || 0}
                 downloads={hit.downloads || 0}
               />

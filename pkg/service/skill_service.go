@@ -76,6 +76,15 @@ func (s *SkillService) loggerOrDefault() *slog.Logger {
 	return slog.Default()
 }
 
+// invalidateSkillCache clears both bare-slug and namespace-qualified cache entries
+// for a skill. Must be called after any mutation that changes skill metadata.
+func (s *SkillService) invalidateSkillCache(skill *model.SkillWithOwner) {
+	s.skillRepo.InvalidateCache(skill.Slug)
+	if skill.NamespaceID != nil {
+		s.skillRepo.InvalidateCacheNS(skill.NamespaceID.String(), skill.Slug)
+	}
+}
+
 // SetNamespaceService injects the namespace service for membership/publish checks.
 // Optional — when nil, namespace-bound publishing is disabled.
 func (s *SkillService) SetNamespaceService(ns *NamespaceService) {
@@ -210,7 +219,8 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		}
 	}
 
-	// Resolve namespace if requested. Membership is required to publish.
+	// Resolve namespace. Every skill must belong to a namespace.
+	// When none specified, default to the user's personal namespace (lazy-created).
 	var nsID *uuid.UUID
 	if req.NamespaceSlug != "" {
 		if s.nsSvc == nil {
@@ -228,11 +238,20 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 			return nil, nil, fmt.Errorf("not a member of namespace '%s'", req.NamespaceSlug)
 		}
 		nsID = &ns.ID
+	} else {
+		// Default to personal namespace.
+		if s.nsSvc == nil {
+			return nil, nil, fmt.Errorf("namespace publishing not configured on this server")
+		}
+		ns, err := s.nsSvc.EnsurePersonalNamespace(ctx, user)
+		if err != nil {
+			return nil, nil, fmt.Errorf("ensure personal namespace: %w", err)
+		}
+		nsID = &ns.ID
+		req.NamespaceSlug = ns.Slug
 	}
 
 	// 团队 token 必须指向自己 namespace,不允许借此发个人 skill 或别 namespace 的 skill。
-	// 这里只校验 *新 skill* 的 namespace 选择是否合法；下面 existing-skill 分支
-	// 还会再用 authorizeSkillWrite 把已存在的 skill 也校验一次。
 	if req.TokenNamespace != nil {
 		if nsID == nil || *nsID != *req.TokenNamespace {
 			return nil, nil, fmt.Errorf("%w: team token can only publish to its bound namespace", ErrForbidden)
@@ -248,8 +267,8 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		visibility = req.Visibility
 	}
 
-	// Find or create skill
-	skill, err := s.skillRepo.GetBySlug(ctx, req.Slug)
+	// Find or create skill (scoped to the resolved namespace)
+	skill, err := s.skillRepo.GetByNSAndSlug(ctx, *nsID, req.Slug)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get skill: %w", err)
 	}
@@ -484,7 +503,7 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 	// 失效缓存：tx 里走的是 raw `tx.Updates(&model.Skill{})`,绕过了 SkillRepo 的
 	// mutator,无法借助 repo 自身做失效。在这里显式调用,确保下一次 GetBySlug
 	// 读到的是新 latest_version_id / metadata。
-	s.skillRepo.InvalidateCache(skill.Slug)
+	s.invalidateSkillCache(skill)
 
 	// Index to search
 	if s.searchClient != nil {
@@ -501,6 +520,7 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 			Category:         skill.Category,
 			Tags:             []string(skill.Tags),
 			OwnerHandle:      skill.OwnerHandle,
+			NamespaceSlug:    req.NamespaceSlug,
 			Visibility:       skill.Visibility,
 			ModerationStatus: skill.ModerationStatus,
 			IsSuspicious:     skill.IsSuspicious,
@@ -545,15 +565,15 @@ type DownloadResult struct {
 	Version     string
 }
 
-// ResolveVersion returns the version record for a slug+version (accepts "latest").
+// ResolveVersion returns the version record for a ref+version (accepts "latest").
 // It enforces visibility. Returned SkillVersion is non-nil on success.
-func (s *SkillService) ResolveVersion(ctx context.Context, slug, version string, viewer *model.User) (*model.SkillWithOwner, *model.SkillVersion, error) {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
+func (s *SkillService) ResolveVersion(ctx context.Context, ref model.SkillRef, version string, viewer *model.User) (*model.SkillWithOwner, *model.SkillVersion, error) {
+	skill, err := s.resolveSkillRef(ctx, ref)
 	if err != nil {
 		return nil, nil, err
 	}
-	if skill == nil || !canViewSkill(skill, viewer) {
-		return nil, nil, fmt.Errorf("skill not found: %s", slug)
+	if skill == nil || !s.canViewSkill(ctx, skill, viewer) {
+		return nil, nil, fmt.Errorf("skill not found: %s", ref)
 	}
 
 	if version == "" || version == "latest" {
@@ -581,13 +601,13 @@ func (s *SkillService) ResolveVersion(ctx context.Context, slug, version string,
 }
 
 // Download returns a zip archive for a skill version along with its fingerprint.
-func (s *SkillService) Download(ctx context.Context, slug, version, identityHash string, viewer *model.User) (*DownloadResult, error) {
-	skill, ver, err := s.ResolveVersion(ctx, slug, version, viewer)
+func (s *SkillService) Download(ctx context.Context, ref model.SkillRef, version, identityHash string, viewer *model.User) (*DownloadResult, error) {
+	skill, ver, err := s.ResolveVersion(ctx, ref, version, viewer)
 	if err != nil {
 		return nil, err
 	}
 
-	archive, err := s.fileStore.Archive(ctx, skill.OwnerHandle, slug, ver.Version)
+	archive, err := s.fileStore.Archive(ctx, skill.OwnerHandle, skill.Slug, ver.Version)
 	if err != nil {
 		return nil, fmt.Errorf("create archive: %w", err)
 	}
@@ -605,27 +625,27 @@ func (s *SkillService) Download(ctx context.Context, slug, version, identityHash
 
 	return &DownloadResult{
 		Archive:     archive,
-		Filename:    fmt.Sprintf("%s-%s.zip", slug, ver.Version),
+		Filename:    fmt.Sprintf("%s-%s.zip", skill.Slug, ver.Version),
 		Fingerprint: ver.Fingerprint,
 		Version:     ver.Version,
 	}, nil
 }
 
 // GetFile reads a single file from a skill version.
-func (s *SkillService) GetFile(ctx context.Context, slug, version, filePath string, viewer *model.User) ([]byte, error) {
+func (s *SkillService) GetFile(ctx context.Context, ref model.SkillRef, version, filePath string, viewer *model.User) ([]byte, error) {
 	cleanPath := sanitizeFilePath(filePath)
 	if cleanPath == "" {
 		return nil, fmt.Errorf("invalid file path")
 	}
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
+	skill, err := s.resolveSkillRef(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
 	if skill == nil {
-		return nil, fmt.Errorf("skill not found: %s", slug)
+		return nil, fmt.Errorf("skill not found: %s", ref)
 	}
-	if !canViewSkill(skill, viewer) {
-		return nil, fmt.Errorf("skill not found: %s", slug)
+	if !s.canViewSkill(ctx, skill, viewer) {
+		return nil, fmt.Errorf("skill not found: %s", ref)
 	}
 
 	if version == "" || version == "latest" {
@@ -639,7 +659,7 @@ func (s *SkillService) GetFile(ctx context.Context, slug, version, filePath stri
 		version = v.Version
 	}
 
-	content, err := s.fileStore.GetFile(ctx, skill.OwnerHandle, slug, version, cleanPath)
+	content, err := s.fileStore.GetFile(ctx, skill.OwnerHandle, skill.Slug, version, cleanPath)
 	if err != nil {
 		return nil, err
 	}
@@ -669,21 +689,25 @@ func (s *SkillService) ResolveFingerprint(ctx context.Context, fingerprint strin
 	return ver, swo, nil
 }
 
-// GetSkill returns a skill by slug with visibility check.
+// GetSkill returns a skill by ref with visibility check.
 // viewer may be nil for anonymous access.
-func (s *SkillService) GetSkill(ctx context.Context, slug string, viewer *model.User) (*model.SkillWithOwner, error) {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *SkillService) GetSkill(ctx context.Context, ref model.SkillRef, viewer *model.User) (*model.SkillWithOwner, error) {
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
 		return nil, err
 	}
-	if !canViewSkill(skill, viewer) {
+	if skill == nil {
+		return nil, nil
+	}
+	if !s.canViewSkill(ctx, skill, viewer) {
 		return nil, nil // invisible = not found
 	}
 	return skill, nil
 }
 
 // ListSkills returns a paginated list of skills with visibility filtering.
-func (s *SkillService) ListSkills(ctx context.Context, limit int, cursor, sortKey, category string, viewer *model.User) ([]model.SkillWithOwner, string, error) {
+// namespaceSlug is optional; when non-empty only skills in that namespace are returned.
+func (s *SkillService) ListSkills(ctx context.Context, limit int, cursor, sortKey, category, namespaceSlug string, viewer *model.User) ([]model.SkillWithOwner, string, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
@@ -691,6 +715,15 @@ func (s *SkillService) ListSkills(ctx context.Context, limit int, cursor, sortKe
 	if viewer != nil {
 		filter.ViewerID = &viewer.ID
 		filter.IsAdmin = viewer.IsModerator()
+	}
+	if namespaceSlug != "" && s.nsSvc != nil {
+		ns, err := s.nsSvc.GetBySlug(ctx, namespaceSlug)
+		if err != nil {
+			return nil, "", err
+		}
+		if ns != nil {
+			filter.NamespaceID = &ns.ID
+		}
 	}
 	return s.skillRepo.List(ctx, limit, cursor, sortKey, filter)
 }
@@ -704,9 +737,12 @@ func (s *SkillService) ListAllSkillsForAdmin(ctx context.Context, limit int, cur
 }
 
 // RequestPublic lets the owner request to make a skill public.
-func (s *SkillService) RequestPublic(ctx context.Context, user *model.User, slug string) error {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *SkillService) RequestPublic(ctx context.Context, user *model.User, ref model.SkillRef) error {
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if skill == nil {
 		return fmt.Errorf("skill not found")
 	}
 	if skill.OwnerID != user.ID && !user.IsAdmin() {
@@ -718,7 +754,7 @@ func (s *SkillService) RequestPublic(ctx context.Context, user *model.User, slug
 	if err := s.skillRepo.SetVisibility(ctx, skill.ID, "private", "pending_review"); err != nil {
 		return err
 	}
-	s.skillRepo.InvalidateCache(skill.Slug)
+	s.invalidateSkillCache(skill)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, &user.ID, "request_public", "skill", &skill.ID, "", "")
 	}
@@ -726,8 +762,8 @@ func (s *SkillService) RequestPublic(ctx context.Context, user *model.User, slug
 }
 
 // ReviewSkill lets an admin/moderator approve or reject a skill for public visibility.
-func (s *SkillService) ReviewSkill(ctx context.Context, reviewerID *uuid.UUID, slug string, approve bool) error {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
+func (s *SkillService) ReviewSkill(ctx context.Context, reviewerID *uuid.UUID, ref model.SkillRef, approve bool) error {
+	skill, err := s.resolveSkillRef(ctx, ref)
 	if err != nil || skill == nil {
 		return fmt.Errorf("skill not found")
 	}
@@ -742,7 +778,7 @@ func (s *SkillService) ReviewSkill(ctx context.Context, reviewerID *uuid.UUID, s
 			return err
 		}
 	}
-	s.skillRepo.InvalidateCache(skill.Slug)
+	s.invalidateSkillCache(skill)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, reviewerID, action, "skill", &skill.ID, "", "")
 	}
@@ -750,8 +786,8 @@ func (s *SkillService) ReviewSkill(ctx context.Context, reviewerID *uuid.UUID, s
 }
 
 // SetSkillVisibility lets an admin directly set a skill's visibility.
-func (s *SkillService) SetSkillVisibility(ctx context.Context, adminID *uuid.UUID, slug, visibility string) error {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
+func (s *SkillService) SetSkillVisibility(ctx context.Context, adminID *uuid.UUID, ref model.SkillRef, visibility string) error {
+	skill, err := s.resolveSkillRef(ctx, ref)
 	if err != nil || skill == nil {
 		return fmt.Errorf("skill not found")
 	}
@@ -762,49 +798,54 @@ func (s *SkillService) SetSkillVisibility(ctx context.Context, adminID *uuid.UUI
 	if err := s.skillRepo.SetVisibility(ctx, skill.ID, visibility, moderationStatus); err != nil {
 		return err
 	}
-	s.skillRepo.InvalidateCache(skill.Slug)
+	s.invalidateSkillCache(skill)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, adminID, "set_visibility", "skill", &skill.ID, visibility, "")
 	}
 	return nil
 }
 
+// resolveSkillRef resolves a SkillRef to a SkillWithOwner.
+//
+// Qualified refs (@namespace/slug) do a direct lookup by namespace+slug.
+// Bare refs (slug only) search globally and handle disambiguation:
+//   - 0 matches → nil, nil (not found)
+//   - 1 match  → return it
+//   - N matches → return AmbiguousSlugError (maps to 409)
+func (s *SkillService) resolveSkillRef(ctx context.Context, ref model.SkillRef) (*model.SkillWithOwner, error) {
+	return resolveSkillRefWith(ctx, ref, s.skillRepo, s.nsSvc)
+}
+
 // canViewSkill checks if a viewer has access to a skill.
-func canViewSkill(skill *model.SkillWithOwner, viewer *model.User) bool {
-	// Public and approved: visible to all
-	if skill.Visibility == "public" && skill.ModerationStatus == "approved" {
-		return true
-	}
-	if viewer == nil {
-		return false
-	}
-	// Admin/moderator can see all
-	if viewer.IsModerator() {
-		return true
-	}
-	// Owner can see their own skill
-	return skill.OwnerID == viewer.ID
+func (s *SkillService) canViewSkill(ctx context.Context, skill *model.SkillWithOwner, viewer *model.User) bool {
+	return canViewSkillWith(ctx, skill, viewer, s.nsSvc)
 }
 
 // GetVersions returns all versions for a skill.
-func (s *SkillService) GetVersions(ctx context.Context, slug string, viewer *model.User) ([]model.SkillVersion, error) {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *SkillService) GetVersions(ctx context.Context, ref model.SkillRef, viewer *model.User) ([]model.SkillVersion, error) {
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
 		return nil, err
 	}
-	if !canViewSkill(skill, viewer) {
+	if skill == nil {
+		return nil, nil
+	}
+	if !s.canViewSkill(ctx, skill, viewer) {
 		return nil, nil
 	}
 	return s.versionRepo.ListBySkill(ctx, skill.ID)
 }
 
 // GetVersion returns a specific version.
-func (s *SkillService) GetVersion(ctx context.Context, slug, version string, viewer *model.User) (*model.SkillVersion, error) {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *SkillService) GetVersion(ctx context.Context, ref model.SkillRef, version string, viewer *model.User) (*model.SkillVersion, error) {
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
 		return nil, err
 	}
-	if !canViewSkill(skill, viewer) {
+	if skill == nil {
+		return nil, nil
+	}
+	if !s.canViewSkill(ctx, skill, viewer) {
 		return nil, nil
 	}
 	return s.versionRepo.GetBySkillAndVersion(ctx, skill.ID, version)
@@ -815,9 +856,12 @@ func (s *SkillService) GetVersion(ctx context.Context, slug, version string, vie
 // tokenNS:当前请求 token 绑定的 namespace ID(由 handler 透传)。
 //   - 非 nil ⇒ 团队 token：要求 skill 隶属同一 namespace,跳过 owner 自检；
 //   - nil    ⇒ 个人 token / cookie：必须本人 owner 或系统 admin。
-func (s *SkillService) SoftDelete(ctx context.Context, user *model.User, slug string, tokenNS *uuid.UUID) error {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *SkillService) SoftDelete(ctx context.Context, user *model.User, ref model.SkillRef, tokenNS *uuid.UUID) error {
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if skill == nil {
 		return fmt.Errorf("skill not found")
 	}
 	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
@@ -826,32 +870,43 @@ func (s *SkillService) SoftDelete(ctx context.Context, user *model.User, slug st
 	if err := s.skillRepo.SoftDelete(ctx, skill.ID); err != nil {
 		return err
 	}
-	s.skillRepo.InvalidateCache(skill.Slug)
+	s.invalidateSkillCache(skill)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, &user.ID, "delete", "skill", &skill.ID, "", "")
 	}
 	return nil
 }
 
-func (s *SkillService) PurgeBySlug(ctx context.Context, user *model.User, slug string) error {
+func (s *SkillService) PurgeByRef(ctx context.Context, user *model.User, ref model.SkillRef) error {
 	if user.Role != "admin" {
 		return fmt.Errorf("admin required")
 	}
-	skill, _ := s.skillRepo.GetBySlugIncludeDeleted(ctx, slug)
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
+		return err
+	}
+	slug := ref.Slug
 	if skill != nil {
+		slug = skill.Slug
 		_ = s.fileStore.Delete(ctx, skill.OwnerHandle, slug)
 	}
 	if err := s.skillRepo.HardDeleteBySlug(ctx, slug); err != nil {
 		return err
 	}
 	s.skillRepo.InvalidateCache(slug)
+	if skill != nil && skill.NamespaceID != nil {
+		s.skillRepo.InvalidateCacheNS(skill.NamespaceID.String(), slug)
+	}
 	return nil
 }
 
 // Undelete restores a soft-deleted skill. tokenNS 语义同 SoftDelete。
-func (s *SkillService) Undelete(ctx context.Context, user *model.User, slug string, tokenNS *uuid.UUID) error {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *SkillService) Undelete(ctx context.Context, user *model.User, ref model.SkillRef, tokenNS *uuid.UUID) error {
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if skill == nil {
 		return fmt.Errorf("skill not found")
 	}
 	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
@@ -860,7 +915,7 @@ func (s *SkillService) Undelete(ctx context.Context, user *model.User, slug stri
 	if err := s.skillRepo.Undelete(ctx, skill.ID); err != nil {
 		return err
 	}
-	s.skillRepo.InvalidateCache(skill.Slug)
+	s.invalidateSkillCache(skill)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, &user.ID, "undelete", "skill", &skill.ID, "", "")
 	}
@@ -868,9 +923,12 @@ func (s *SkillService) Undelete(ctx context.Context, user *model.User, slug stri
 }
 
 // Star adds a star to a skill (atomic transaction).
-func (s *SkillService) Star(ctx context.Context, userID uuid.UUID, slug string) error {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *SkillService) Star(ctx context.Context, userID uuid.UUID, ref model.SkillRef) error {
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if skill == nil {
 		return fmt.Errorf("skill not found")
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -882,9 +940,12 @@ func (s *SkillService) Star(ctx context.Context, userID uuid.UUID, slug string) 
 }
 
 // Unstar removes a star from a skill (atomic transaction).
-func (s *SkillService) Unstar(ctx context.Context, userID uuid.UUID, slug string) error {
-	skill, err := s.skillRepo.GetBySlugOrAlias(ctx, slug)
-	if err != nil || skill == nil {
+func (s *SkillService) Unstar(ctx context.Context, userID uuid.UUID, ref model.SkillRef) error {
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if skill == nil {
 		return fmt.Errorf("skill not found")
 	}
 	starred, err := s.starRepo.IsStarred(ctx, userID, skill.ID)
@@ -902,6 +963,123 @@ func (s *SkillService) Unstar(ctx context.Context, userID uuid.UUID, slug string
 	})
 }
 
+
+// UpdateFileRequest describes a single-file update that auto-bumps the patch version.
+type UpdateFileRequest struct {
+	Ref            model.SkillRef
+	Path           string
+	Content        []byte
+	Changelog      string
+	TokenNamespace *uuid.UUID
+}
+
+// UpdateFile replaces a single file in the latest version of a skill and
+// publishes a new version with the patch number incremented.
+func (s *SkillService) UpdateFile(ctx context.Context, user *model.User, req UpdateFileRequest) (*model.SkillWithOwner, *model.SkillVersion, error) {
+	cleanPath := sanitizeFilePath(req.Path)
+	if cleanPath == "" {
+		return nil, nil, fmt.Errorf("invalid file path")
+	}
+
+	skill, err := s.resolveSkillRef(ctx, req.Ref)
+	if err != nil {
+		return nil, nil, err
+	}
+	if skill == nil {
+		return nil, nil, fmt.Errorf("skill not found: %s", req.Ref)
+	}
+	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, req.TokenNamespace); err != nil {
+		return nil, nil, err
+	}
+
+	if skill.LatestVersionID == nil {
+		return nil, nil, fmt.Errorf("no versions published")
+	}
+	latest, err := s.versionRepo.GetByID(ctx, *skill.LatestVersionID)
+	if err != nil || latest == nil {
+		return nil, nil, fmt.Errorf("latest version not found")
+	}
+
+	var fileMeta []model.VersionFile
+	if err := json.Unmarshal(latest.Files, &fileMeta); err != nil {
+		return nil, nil, fmt.Errorf("parse version files: %w", err)
+	}
+
+	files := make(map[string][]byte, len(fileMeta)+1)
+	for _, fm := range fileMeta {
+		content, err := s.fileStore.GetFile(ctx, skill.OwnerHandle, skill.Slug, latest.Version, fm.Path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read file %s: %w", fm.Path, err)
+		}
+		files[fm.Path] = content
+	}
+	files[cleanPath] = req.Content
+
+	newVersion := semver.BumpPatch(latest.Version)
+	changelog := req.Changelog
+	if changelog == "" {
+		changelog = fmt.Sprintf("update %s", cleanPath)
+	}
+
+	pubReq := PublishRequest{
+		Slug:           skill.Slug,
+		Version:        newVersion,
+		Changelog:      changelog,
+		Files:          files,
+		NamespaceSlug:  skill.NamespaceSlug,
+		TokenNamespace: req.TokenNamespace,
+	}
+	if skill.DisplayName != nil {
+		pubReq.DisplayName = *skill.DisplayName
+	}
+	if skill.Summary != nil {
+		pubReq.Summary = *skill.Summary
+	}
+	pubReq.Category = skill.Category
+	pubReq.Tags = []string(skill.Tags)
+
+	return s.PublishVersion(ctx, user, pubReq)
+}
+
+// ReindexAll rebuilds the search index for all non-deleted skills.
+// Intended for startup or admin-triggered reindex after schema changes.
+func (s *SkillService) ReindexAll(ctx context.Context) (int, error) {
+	if s.searchClient == nil {
+		return 0, nil
+	}
+	skills, _, err := s.skillRepo.List(ctx, 10000, "", "created", repository.ListFilter{IsAdmin: true})
+	if err != nil {
+		return 0, fmt.Errorf("list skills for reindex: %w", err)
+	}
+	count := 0
+	for i := range skills {
+		sk := &skills[i]
+		doc := &search.SkillDocument{
+			ID:               sk.ID.String(),
+			Slug:             sk.Slug,
+			DisplayName:      derefStr(sk.DisplayName),
+			Summary:          derefStr(sk.Summary),
+			Category:         sk.Category,
+			Tags:             []string(sk.Tags),
+			OwnerHandle:      sk.OwnerHandle,
+			NamespaceSlug:    sk.NamespaceSlug,
+			Visibility:       sk.Visibility,
+			ModerationStatus: sk.ModerationStatus,
+			IsSuspicious:     sk.IsSuspicious,
+			IsDeleted:        sk.SoftDeletedAt != nil,
+			Downloads:        sk.Downloads,
+			Stars:            sk.StarsCount,
+			UpdatedAt:        sk.UpdatedAt.Unix(),
+			CreatedAt:        sk.CreatedAt.Unix(),
+		}
+		if err := s.searchClient.IndexSkill(ctx, doc); err != nil {
+			s.loggerOrDefault().Warn("reindex skill failed", "slug", sk.Slug, "err", err)
+			continue
+		}
+		count++
+	}
+	return count, nil
+}
 
 func extractFrontmatter(content []byte) json.RawMessage {
 	s := string(content)
