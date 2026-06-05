@@ -41,6 +41,8 @@ skillhub-*
 
 # Runtime data
 data/
+bash-output/
+tool-output/
 
 # OMC state
 .omc/
