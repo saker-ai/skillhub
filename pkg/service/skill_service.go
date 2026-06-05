@@ -855,6 +855,41 @@ func (s *SkillService) resolveSkillRef(ctx context.Context, ref model.SkillRef) 
 	return resolveSkillRefWith(ctx, ref, s.skillRepo, s.nsSvc)
 }
 
+func (s *SkillService) resolveSkillRefIncludeDeleted(ctx context.Context, ref model.SkillRef) (*model.SkillWithOwner, error) {
+	if ref.IsQualified() {
+		if s.nsSvc == nil {
+			return nil, nil
+		}
+		ns, err := s.nsSvc.GetBySlug(ctx, ref.Namespace)
+		if err != nil || ns == nil {
+			return nil, nil
+		}
+		return s.skillRepo.GetByNSAndSlugIncludeDeleted(ctx, ns.ID, ref.Slug)
+	}
+
+	all, err := s.skillRepo.GetBySlugGlobalIncludeDeleted(ctx, ref.Slug)
+	if err != nil {
+		return nil, err
+	}
+	switch len(all) {
+	case 0:
+		return nil, nil
+	case 1:
+		return &all[0], nil
+	default:
+		candidates := make([]AmbiguousCandidate, 0, len(all))
+		for i := range all {
+			candidates = append(candidates, AmbiguousCandidate{
+				Namespace:   all[i].NamespaceSlug,
+				Slug:        all[i].Slug,
+				OwnerHandle: all[i].OwnerHandle,
+				SkillID:     all[i].ID.String(),
+			})
+		}
+		return nil, &AmbiguousSlugError{Slug: ref.Slug, Candidates: candidates}
+	}
+}
+
 // canViewSkill checks if a viewer has access to a skill.
 func (s *SkillService) canViewSkill(ctx context.Context, skill *model.SkillWithOwner, viewer *model.User) bool {
 	return canViewSkillWith(ctx, skill, viewer, s.nsSvc)
@@ -941,7 +976,7 @@ func (s *SkillService) PurgeByRef(ctx context.Context, user *model.User, ref mod
 
 // Undelete restores a soft-deleted skill. tokenNS 语义同 SoftDelete。
 func (s *SkillService) Undelete(ctx context.Context, user *model.User, ref model.SkillRef, tokenNS *uuid.UUID) error {
-	skill, err := s.resolveSkillRef(ctx, ref)
+	skill, err := s.resolveSkillRefIncludeDeleted(ctx, ref)
 	if err != nil {
 		return err
 	}

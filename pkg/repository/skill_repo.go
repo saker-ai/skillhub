@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/google/uuid"
+	"github.com/saker-ai/skillhub/pkg/model"
 	"gorm.io/gorm"
 )
 
@@ -95,6 +95,26 @@ func (r *SkillRepo) GetByNSAndSlug(ctx context.Context, namespaceID uuid.UUID, s
 	return &skill, nil
 }
 
+// GetByNSAndSlugIncludeDeleted looks up a skill by namespace and slug without
+// filtering soft-deleted rows. It intentionally bypasses the live-skill cache.
+func (r *SkillRepo) GetByNSAndSlugIncludeDeleted(ctx context.Context, namespaceID uuid.UUID, slug string) (*model.SkillWithOwner, error) {
+	var skill model.SkillWithOwner
+	err := r.db.WithContext(ctx).
+		Table("skills").
+		Select(skillWithOwnerSelect).
+		Joins("JOIN users ON skills.owner_id = users.id").
+		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
+		Where("skills.namespace_id = ? AND skills.slug = ?", namespaceID, slug).
+		First(&skill).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &skill, nil
+}
+
 // GetBySlugGlobal returns all non-deleted skills matching a slug across all namespaces.
 // Used for disambiguation when a bare slug is ambiguous.
 func (r *SkillRepo) GetBySlugGlobal(ctx context.Context, slug string) ([]model.SkillWithOwner, error) {
@@ -105,6 +125,21 @@ func (r *SkillRepo) GetBySlugGlobal(ctx context.Context, slug string) ([]model.S
 		Joins("JOIN users ON skills.owner_id = users.id").
 		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
 		Where("skills.slug = ? AND skills.soft_deleted_at IS NULL", slug).
+		Find(&skills).Error
+	return skills, err
+}
+
+// GetBySlugGlobalIncludeDeleted returns all skills matching a slug across all
+// namespaces, including soft-deleted rows. Used by restore paths that must be
+// able to resolve the deleted record before clearing SoftDeletedAt.
+func (r *SkillRepo) GetBySlugGlobalIncludeDeleted(ctx context.Context, slug string) ([]model.SkillWithOwner, error) {
+	var skills []model.SkillWithOwner
+	err := r.db.WithContext(ctx).
+		Table("skills").
+		Select(skillWithOwnerSelect).
+		Joins("JOIN users ON skills.owner_id = users.id").
+		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
+		Where("skills.slug = ?", slug).
 		Find(&skills).Error
 	return skills, err
 }
