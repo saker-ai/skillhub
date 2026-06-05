@@ -179,6 +179,24 @@ api.Options{
 
 Session 加载的插件按 thread 缓存（TTL 10 分钟），支持跨 turn 复用。
 
+## 测试与 Saker 联动
+
+在干净检出中运行后端测试：
+
+```bash
+make test
+```
+
+`make test` 会先准备轻量的 `web/static/` embed 目录，再执行 Go 测试；因此即使尚未构建前端也可以运行。需要把真实 Vite 产物嵌入二进制时，使用 `make frontend` 或 `make build`。
+
+如需验证 Saker 与当前 SkillHub 协议面的联动，在 Saker 仓库运行：
+
+```bash
+go test ./pkg/skillhub ./pkg/plugin ./pkg/server/agui ./pkg/server/openai ./pkg/runtime/subagents
+```
+
+这组定向测试覆盖 SkillHub client、远程 plugin loader、`skillhub_uri` / `plugin_uri` 解析、AG-UI 与 OpenAI 的 session 级加载、domain-token 注入、thread 级缓存，以及 subagent worktree 处理。
+
 ## 架构
 
 ```mermaid

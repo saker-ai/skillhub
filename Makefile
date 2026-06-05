@@ -1,4 +1,4 @@
-.PHONY: build deps dev run setup clean help quickstart test lint frontend dev-frontend dev-backend
+.PHONY: build deps dev run setup clean help quickstart test lint frontend dev-frontend dev-backend ensure-static
 
 # Build frontend (React + Vite)
 frontend:
@@ -8,8 +8,14 @@ frontend:
 build: frontend
 	go build -o skillhub ./cmd/skillhub/
 
-# Build Go only (skip frontend, assumes web/static/ exists)
-build-go:
+# Ensure the embed target exists for Go-only commands in a clean checkout.
+ensure-static:
+	mkdir -p web/static
+	cp web/index.html web/static/index.html
+	cp -R web/public/. web/static/
+
+# Build Go only (skip frontend)
+build-go: ensure-static
 	go build -o skillhub ./cmd/skillhub/
 
 # Download Go dependencies
@@ -92,7 +98,7 @@ clean:
 # 会把它当成项目包扫;过滤掉之后测试输出干净、跑得也快。
 # 不能用 web/go.mod 隔离,因为父模块 import "github.com/saker-ai/skillhub/web"
 # 取 embed.FS,加 nested go.mod 会切断这条 import。
-test:
+test: ensure-static
 	go test $$(go list ./... | grep -v /web/node_modules/)
 
 # Lint

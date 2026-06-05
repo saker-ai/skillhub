@@ -179,6 +179,24 @@ When loaded, a plugin's components are decomposed and injected:
 
 Session-loaded plugins are cached per-thread (TTL 10min) for cross-turn reuse.
 
+## Testing and Saker Integration
+
+Run the backend test suite from a clean checkout with:
+
+```bash
+make test
+```
+
+`make test` prepares a lightweight `web/static/` embed directory before invoking Go tests, so it works even before the frontend has been built. Use `make frontend` or `make build` when you need the real Vite assets embedded in the binary.
+
+To validate the Saker integration against the current SkillHub protocol surface, run these in the Saker repository:
+
+```bash
+go test ./pkg/skillhub ./pkg/plugin ./pkg/server/agui ./pkg/server/openai ./pkg/runtime/subagents
+```
+
+That targeted suite covers the SkillHub client, remote plugin loader, `skillhub_uri` / `plugin_uri` parsing, AG-UI and OpenAI per-session loading, domain-token handling, thread-level caches, and subagent worktree handling.
+
 ## Architecture
 
 ```mermaid
