@@ -163,10 +163,16 @@ func (s *SkillService) authorizeSkillWrite(skillNS *uuid.UUID, ownerID uuid.UUID
 		}
 		return nil
 	}
-	if ownerID != user.ID && !user.IsAdmin() {
-		return fmt.Errorf("%w: only the skill owner or a system admin can perform this action", ErrForbidden)
+	if ownerID == user.ID || user.IsAdmin() {
+		return nil
 	}
-	return nil
+	if skillNS != nil && s.nsSvc != nil {
+		role, err := s.nsSvc.GetMemberRole(context.Background(), *skillNS, user.ID)
+		if err == nil && role != "" && role != "reader" {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: only the skill owner, namespace member, or system admin can perform this action", ErrForbidden)
 }
 
 func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req PublishRequest) (*model.SkillWithOwner, *model.SkillVersion, error) {

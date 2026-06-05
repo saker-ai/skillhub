@@ -349,6 +349,11 @@ func (s *NamespaceService) ListMemberIDs(ctx context.Context, nsID uuid.UUID) ([
 	return s.nsRepo.ListMemberIDs(ctx, nsID)
 }
 
+// GetMemberRole returns the user's role in the namespace, or "" if not a member.
+func (s *NamespaceService) GetMemberRole(ctx context.Context, nsID uuid.UUID, userID uuid.UUID) (string, error) {
+	return s.nsRepo.GetMemberRole(ctx, nsID, userID)
+}
+
 // IsMemberOrAdmin checks if a user is a member of the namespace or a system admin.
 func (s *NamespaceService) IsMemberOrAdmin(ctx context.Context, nsID uuid.UUID, user *model.User) bool {
 	if user.IsAdmin() {
