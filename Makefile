@@ -1,4 +1,4 @@
-.PHONY: build deps dev run setup clean help quickstart test lint frontend dev-frontend dev-backend
+.PHONY: build deps dev run setup clean help quickstart test test-static lint frontend dev-frontend dev-backend
 
 # Build frontend (React + Vite)
 frontend:
@@ -92,8 +92,19 @@ clean:
 # 会把它当成项目包扫;过滤掉之后测试输出干净、跑得也快。
 # 不能用 web/go.mod 隔离,因为父模块 import "github.com/saker-ai/skillhub/web"
 # 取 embed.FS,加 nested go.mod 会切断这条 import。
-test:
+test: test-static
 	go test $$(go list ./... | grep -v /web/node_modules/)
+
+# Create the smallest embedded frontend tree needed by Go tests when the
+# real Vite build has not been generated yet. The files live under ignored
+# web/static/ so production builds can freely replace them.
+test-static:
+	@mkdir -p web/static/assets web/static/swagger
+	@printf '<!doctype html><title>SkillHub test shell</title><div id="root"></div>\n' > web/static/index.html
+	@cp -f web/public/swagger-init.js web/static/swagger-init.js
+	@printf '/* test placeholder for swagger-ui-dist */\n' > web/static/swagger/swagger-ui.css
+	@printf 'window.SwaggerUIBundle=window.SwaggerUIBundle||function(){return {}};window.SwaggerUIBundle.presets={apis:[]};\n' > web/static/swagger/swagger-ui-bundle.js
+	@printf '' > web/static/assets/.gitkeep
 
 # Lint
 #

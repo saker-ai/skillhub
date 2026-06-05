@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
@@ -58,7 +58,7 @@ export default function NamespaceDetail() {
     }
   }, [authLoading, user, navigate, slug]);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -77,11 +77,11 @@ export default function NamespaceDetail() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [slug]);
 
   useEffect(() => {
     if (user && slug) refresh();
-  }, [user, slug]);
+  }, [user, slug, refresh]);
 
   // Whether the current user can manage tokens (owner or admin in this ns).
   const myMembership = members.find(m => m.handle === user?.handle);

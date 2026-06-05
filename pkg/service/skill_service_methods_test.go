@@ -16,6 +16,7 @@ import (
 	"github.com/saker-ai/skillhub/pkg/metrics"
 	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/saker-ai/skillhub/pkg/repository"
+	"github.com/saker-ai/skillhub/pkg/search"
 	storegit "github.com/saker-ai/skillhub/pkg/store/git"
 )
 
@@ -595,6 +596,54 @@ func TestSkillService_RequestPublic(t *testing.T) {
 					got.Visibility, got.ModerationStatus)
 			}
 		})
+	}
+}
+
+func TestSkillService_SetSkillVisibilityReindexesSearch(t *testing.T) {
+	t.Parallel()
+
+	fx := setupSkillFixtures(t)
+	sc, err := search.New(config.SearchConfig{IndexPath: filepath.Join(t.TempDir(), "skills.bleve")})
+	if err != nil {
+		t.Fatalf("search.New: %v", err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	fx.svc.searchClient = sc
+
+	ctx := context.Background()
+	if _, _, err := fx.svc.PublishVersion(ctx, fx.admin, PublishRequest{
+		Slug:    "visibility-index",
+		Version: "1.0.0",
+		Summary: "unique-search-needle",
+		Files: map[string][]byte{
+			"SKILL.md": []byte("---\nname: visibility-index\n---\n# visibility-index\n"),
+		},
+	}); err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	filters := []search.Filter{
+		{Field: "visibility", Value: "public"},
+		{Field: "moderationStatus", Value: "approved"},
+		{Field: "isDeleted", Value: false},
+	}
+	before, err := sc.Search(ctx, "unique-search-needle", 10, 0, nil, filters)
+	if err != nil {
+		t.Fatalf("search before visibility change: %v", err)
+	}
+	if before.EstimatedTotal != 0 {
+		t.Fatalf("private skill search hits before visibility change = %d, want 0", before.EstimatedTotal)
+	}
+
+	if err := fx.svc.SetSkillVisibility(ctx, ptrUUID(fx.admin.ID), model.SkillRef{Slug: "visibility-index"}, "public"); err != nil {
+		t.Fatalf("SetSkillVisibility: %v", err)
+	}
+	after, err := sc.Search(ctx, "unique-search-needle", 10, 0, nil, filters)
+	if err != nil {
+		t.Fatalf("search after visibility change: %v", err)
+	}
+	if after.EstimatedTotal != 1 {
+		t.Fatalf("public skill search hits after visibility change = %d, want 1", after.EstimatedTotal)
 	}
 }
 
