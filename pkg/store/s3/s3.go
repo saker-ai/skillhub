@@ -2,7 +2,7 @@
 //
 // 通过 init() 自注册到 store 驱动表，调用方只需 blank import：
 //
-//	import _ "github.com/cinience/skillhub/pkg/store/s3"
+//	import _ "github.com/saker-ai/skillhub/pkg/store/s3"
 //
 // 即可让 cfg.Store.Backend == "s3" 自动解析到本 backend。
 //
@@ -22,9 +22,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/semver"
-	"github.com/cinience/skillhub/pkg/store"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/semver"
+	"github.com/saker-ai/skillhub/pkg/store"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"

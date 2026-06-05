@@ -1,7 +1,7 @@
 # SkillHub
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/cinience/skillhub)](https://goreportcard.com/report/github.com/cinience/skillhub)
+[![Go Report Card](https://goreportcard.com/badge/github.com/saker-ai/skillhub)](https://goreportcard.com/report/github.com/saker-ai/skillhub)
 
 自托管的 Agent 技能与插件注册中心，用于发布、版本管理与分发 agent 技能和插件 bundle。支持 Web UI、REST API 和 CLI 客户端，兼容 [ClawHub](https://github.com/openclaw/clawhub) 协议。适合企业内部构建自己的 agent 技能和插件注册中心。
 
@@ -25,7 +25,7 @@
 前置条件：Go 1.25+、Node.js 22+
 
 ```bash
-git clone https://github.com/cinience/skillhub.git
+git clone https://github.com/saker-ai/skillhub.git
 cd skillhub
 make quickstart ADMIN_USER=admin ADMIN_PASSWORD=admin123
 ```
@@ -37,7 +37,7 @@ make quickstart ADMIN_USER=admin ADMIN_PASSWORD=admin123
 ### Docker Compose（生产部署）
 
 ```bash
-git clone https://github.com/cinience/skillhub.git
+git clone https://github.com/saker-ai/skillhub.git
 cd skillhub
 SKILLHUB_ADMIN_PASSWORD=secret make docker-up
 ```

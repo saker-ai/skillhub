@@ -14,11 +14,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cinience/skillhub/pkg/model"
-	"github.com/cinience/skillhub/pkg/repository"
-	"github.com/cinience/skillhub/pkg/search"
-	"github.com/cinience/skillhub/pkg/semver"
-	"github.com/cinience/skillhub/pkg/store"
+	"github.com/saker-ai/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/repository"
+	"github.com/saker-ai/skillhub/pkg/search"
+	"github.com/saker-ai/skillhub/pkg/semver"
+	"github.com/saker-ai/skillhub/pkg/store"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )

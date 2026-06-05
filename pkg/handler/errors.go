@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/cinience/skillhub/pkg/service"
+	"github.com/saker-ai/skillhub/pkg/service"
 	"github.com/gin-gonic/gin"
 )
 

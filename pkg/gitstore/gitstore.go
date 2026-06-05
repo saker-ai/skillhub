@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cinience/skillhub/pkg/semver"
+	"github.com/saker-ai/skillhub/pkg/semver"
 
 	"github.com/go-git/go-git/v5"
 	gitconfig "github.com/go-git/go-git/v5/config"

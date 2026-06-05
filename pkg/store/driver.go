@@ -5,8 +5,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/gitstore"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/gitstore"
 )
 
 // OpenContext 汇集了所有 backend 在构造时可能用到的依赖。

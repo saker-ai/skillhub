@@ -15,16 +15,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cinience/skillhub"
-	"github.com/cinience/skillhub/pkg/auth"
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/metrics"
-	"github.com/cinience/skillhub/pkg/model"
-	"github.com/cinience/skillhub/pkg/repository"
+	"github.com/saker-ai/skillhub"
+	"github.com/saker-ai/skillhub/pkg/auth"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/metrics"
+	"github.com/saker-ai/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/repository"
 
 	// Blank-import the default backends so cfg.Store.Backend == "" 解析为 git。
 	// 与 cmd/skillhub/main.go 的导入语义一致。
-	_ "github.com/cinience/skillhub/pkg/store/git"
+	_ "github.com/saker-ai/skillhub/pkg/store/git"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

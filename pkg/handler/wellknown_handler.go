@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/cinience/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/gin-gonic/gin"
 )
 

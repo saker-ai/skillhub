@@ -14,7 +14,7 @@ import (
 
 	"time"
 
-	"github.com/cinience/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/config"
 )
 
 var mirrorHTTPClient = &http.Client{Timeout: 15 * time.Second}

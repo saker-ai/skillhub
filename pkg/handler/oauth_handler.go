@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/cinience/skillhub/pkg/auth"
+	"github.com/saker-ai/skillhub/pkg/auth"
 	"github.com/gin-gonic/gin"
 )
 

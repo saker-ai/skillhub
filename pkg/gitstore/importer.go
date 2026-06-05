@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cinience/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/config"
 )
 
 type ImportService struct {

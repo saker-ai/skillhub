@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 
-	"github.com/cinience/skillhub/web"
+	"github.com/saker-ai/skillhub/web"
 )
 
 // OpenAPIHandler 暴露 OpenAPI 规范与 Swagger UI。

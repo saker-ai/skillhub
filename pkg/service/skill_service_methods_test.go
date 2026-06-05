@@ -11,12 +11,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"gorm.io/gorm"
 
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/gitstore"
-	"github.com/cinience/skillhub/pkg/metrics"
-	"github.com/cinience/skillhub/pkg/model"
-	"github.com/cinience/skillhub/pkg/repository"
-	storegit "github.com/cinience/skillhub/pkg/store/git"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/gitstore"
+	"github.com/saker-ai/skillhub/pkg/metrics"
+	"github.com/saker-ai/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/repository"
+	storegit "github.com/saker-ai/skillhub/pkg/store/git"
 )
 
 // skillFixtures bundles the dependencies the SkillService methods touch.

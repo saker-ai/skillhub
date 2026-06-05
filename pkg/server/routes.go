@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/cinience/skillhub/pkg/middleware"
-	"github.com/cinience/skillhub/web"
+	"github.com/saker-ai/skillhub/pkg/middleware"
+	"github.com/saker-ai/skillhub/web"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )

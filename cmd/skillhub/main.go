@@ -10,21 +10,21 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/cinience/skillhub"
-	"github.com/cinience/skillhub/pkg/auth"
-	"github.com/cinience/skillhub/pkg/cli"
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/model"
-	"github.com/cinience/skillhub/pkg/repository"
+	"github.com/saker-ai/skillhub"
+	"github.com/saker-ai/skillhub/pkg/auth"
+	"github.com/saker-ai/skillhub/pkg/cli"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/repository"
 	"github.com/google/uuid"
 
 	// Blank imports register all built-in store backends with the driver
 	// registry (pkg/store). 独立二进制保持「全功能」语义——支持
 	// cfg.Store.Backend == "git" / "s3" / "oss" 三种值。
 	// 嵌入方按需选择子集即可减小依赖体积。
-	_ "github.com/cinience/skillhub/pkg/store/git"
-	_ "github.com/cinience/skillhub/pkg/store/oss"
-	_ "github.com/cinience/skillhub/pkg/store/s3"
+	_ "github.com/saker-ai/skillhub/pkg/store/git"
+	_ "github.com/saker-ai/skillhub/pkg/store/oss"
+	_ "github.com/saker-ai/skillhub/pkg/store/s3"
 )
 
 // newLogger 按运行模式构造默认 *slog.Logger。

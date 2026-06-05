@@ -2,7 +2,7 @@
 //
 // 通过 init() 自注册到 store 驱动表，调用方只需 blank import：
 //
-//	import _ "github.com/cinience/skillhub/pkg/store/oss"
+//	import _ "github.com/saker-ai/skillhub/pkg/store/oss"
 //
 // 即可让 cfg.Store.Backend == "oss" 自动解析到本 backend。
 //
@@ -22,9 +22,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/semver"
-	"github.com/cinience/skillhub/pkg/store"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/semver"
+	"github.com/saker-ai/skillhub/pkg/store"
 
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 	osscredentials "github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"

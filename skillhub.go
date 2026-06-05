@@ -29,8 +29,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/server"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/server"
 	"github.com/gin-gonic/gin"
 )
 

@@ -90,7 +90,7 @@ clean:
 # 排除 web/node_modules —— npm 包 flatted 顺手附带了一个 Go 实现
 # (web/node_modules/flatted/golang/pkg/flatted/flatted.go),`go test ./...`
 # 会把它当成项目包扫;过滤掉之后测试输出干净、跑得也快。
-# 不能用 web/go.mod 隔离,因为父模块 import "github.com/cinience/skillhub/web"
+# 不能用 web/go.mod 隔离,因为父模块 import "github.com/saker-ai/skillhub/web"
 # 取 embed.FS,加 nested go.mod 会切断这条 import。
 test:
 	go test $$(go list ./... | grep -v /web/node_modules/)

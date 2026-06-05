@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/model"
-	"github.com/cinience/skillhub/pkg/search"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/search"
 	"github.com/gin-gonic/gin"
 )
 

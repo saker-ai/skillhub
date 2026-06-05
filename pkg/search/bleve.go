@@ -10,7 +10,7 @@ import (
 	"github.com/blevesearch/bleve/v2/mapping"
 	bleveSearch "github.com/blevesearch/bleve/v2/search"
 	"github.com/blevesearch/bleve/v2/search/searcher"
-	"github.com/cinience/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/config"
 )
 
 // Suppress unused import warning.

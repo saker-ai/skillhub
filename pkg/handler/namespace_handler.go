@@ -3,8 +3,8 @@ package handler
 import (
 	"net/http"
 
-	"github.com/cinience/skillhub/pkg/middleware"
-	"github.com/cinience/skillhub/pkg/service"
+	"github.com/saker-ai/skillhub/pkg/middleware"
+	"github.com/saker-ai/skillhub/pkg/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )

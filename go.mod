@@ -1,4 +1,4 @@
-module github.com/cinience/skillhub
+module github.com/saker-ai/skillhub
 
 go 1.25.0
 

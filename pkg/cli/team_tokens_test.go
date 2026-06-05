@@ -10,15 +10,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cinience/skillhub"
-	"github.com/cinience/skillhub/pkg/cli"
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub"
+	"github.com/saker-ai/skillhub/pkg/cli"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	// Blank import: matches cmd/skillhub/main.go default backend wiring.
-	_ "github.com/cinience/skillhub/pkg/store/git"
+	_ "github.com/saker-ai/skillhub/pkg/store/git"
 )
 
 // stubIDP returns the same user object whenever a non-empty Bearer token is

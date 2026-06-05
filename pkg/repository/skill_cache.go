@@ -17,7 +17,7 @@ package repository
 import (
 	"time"
 
-	"github.com/cinience/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/model"
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/prometheus/client_golang/prometheus"
 )

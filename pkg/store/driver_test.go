@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cinience/skillhub/pkg/store"
+	"github.com/saker-ai/skillhub/pkg/store"
 )
 
 // fakeBackend 是只用于测试的 store.Store 实现。

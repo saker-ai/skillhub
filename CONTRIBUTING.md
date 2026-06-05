@@ -13,7 +13,7 @@ Thank you for your interest in contributing to SkillHub! This guide will help yo
 ### Getting Started
 
 ```bash
-git clone https://github.com/cinience/skillhub.git
+git clone https://github.com/saker-ai/skillhub.git
 cd skillhub
 
 # Build everything and start with a test admin account

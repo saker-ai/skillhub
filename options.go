@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/cinience/skillhub/pkg/auth"
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/metrics"
+	"github.com/saker-ai/skillhub/pkg/auth"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"gorm.io/gorm"
 )

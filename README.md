@@ -1,7 +1,7 @@
 # SkillHub
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/cinience/skillhub)](https://goreportcard.com/report/github.com/cinience/skillhub)
+[![Go Report Card](https://goreportcard.com/badge/github.com/saker-ai/skillhub)](https://goreportcard.com/report/github.com/saker-ai/skillhub)
 
 Self-hosted agent skill & plugin registry. Publish, version, and distribute agent skills and plugin bundles across your organization — with a Web UI, REST API, and CLI client built on the [ClawHub](https://github.com/openclaw/clawhub) protocol. Ideal for enterprises building their own internal agent skill and plugin registry.
 
@@ -25,7 +25,7 @@ Self-hosted agent skill & plugin registry. Publish, version, and distribute agen
 Prerequisites: Go 1.25+, Node.js 22+
 
 ```bash
-git clone https://github.com/cinience/skillhub.git
+git clone https://github.com/saker-ai/skillhub.git
 cd skillhub
 make quickstart ADMIN_USER=admin ADMIN_PASSWORD=admin123
 ```
@@ -37,7 +37,7 @@ Open http://localhost:10070.
 ### Docker Compose (Production)
 
 ```bash
-git clone https://github.com/cinience/skillhub.git
+git clone https://github.com/saker-ai/skillhub.git
 cd skillhub
 SKILLHUB_ADMIN_PASSWORD=secret make docker-up
 ```

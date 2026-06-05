@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/cinience/skillhub/pkg/repository"
-	"github.com/cinience/skillhub/pkg/service"
+	"github.com/saker-ai/skillhub/pkg/repository"
+	"github.com/saker-ai/skillhub/pkg/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )

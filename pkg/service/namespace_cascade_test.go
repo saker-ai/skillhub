@@ -9,10 +9,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/cinience/skillhub/pkg/config"
-	"github.com/cinience/skillhub/pkg/metrics"
-	"github.com/cinience/skillhub/pkg/model"
-	"github.com/cinience/skillhub/pkg/repository"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/metrics"
+	"github.com/saker-ai/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/repository"
 )
 
 // setupCascadeFixtures 起一个临时 sqlite + 全量 AutoMigrate，并创建一个

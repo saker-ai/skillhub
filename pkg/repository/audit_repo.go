@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"github.com/cinience/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )

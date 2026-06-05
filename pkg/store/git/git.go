@@ -2,7 +2,7 @@
 //
 // 通过 init() 自注册到 store 驱动表，调用方只需 blank import：
 //
-//	import _ "github.com/cinience/skillhub/pkg/store/git"
+//	import _ "github.com/saker-ai/skillhub/pkg/store/git"
 //
 // 即可让 cfg.Store.Backend == "" / "git" 自动解析到本 backend。
 package git
@@ -13,8 +13,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/cinience/skillhub/pkg/gitstore"
-	"github.com/cinience/skillhub/pkg/store"
+	"github.com/saker-ai/skillhub/pkg/gitstore"
+	"github.com/saker-ai/skillhub/pkg/store"
 )
 
 func init() {

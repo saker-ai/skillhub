@@ -1,8 +1,8 @@
 package skillhub
 
 import (
-	"github.com/cinience/skillhub/pkg/model"
-	"github.com/cinience/skillhub/pkg/service"
+	"github.com/saker-ai/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/service"
 )
 
 // 本文件集中再导出（type alias）SkillHub 对外暴露的核心数据类型。

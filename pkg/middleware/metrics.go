@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cinience/skillhub/pkg/metrics"
+	"github.com/saker-ai/skillhub/pkg/metrics"
 	"github.com/gin-gonic/gin"
 )
 

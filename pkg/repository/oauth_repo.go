@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/cinience/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/model"
 	"gorm.io/gorm"
 )
 
