@@ -61,7 +61,7 @@ type WebSkillService interface {
 
 // WebSearchService defines the search operations needed by the web UI.
 type WebSearchService interface {
-	Search(ctx context.Context, query string, limit, offset int, sort []string, filters string) (*search.SearchResult, error)
+	Search(ctx context.Context, query string, limit, offset int, sort []string, filters []search.Filter) (*search.SearchResult, error)
 }
 
 type WebHandler struct {
@@ -247,7 +247,11 @@ func (h *WebHandler) Search(c *gin.Context) {
 
 	if query != "" && h.searchCli != nil {
 		ctx := c.Request.Context()
-		filters := "visibility = public AND moderationStatus = approved AND isDeleted = false"
+		filters := []search.Filter{
+			{Field: "visibility", Value: "public"},
+			{Field: "moderationStatus", Value: "approved"},
+			{Field: "isDeleted", Value: false},
+		}
 		result, err := h.searchCli.Search(ctx, query, 20, 0, nil, filters)
 		if err == nil && result != nil {
 			data["Results"] = result.Hits

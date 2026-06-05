@@ -40,6 +40,7 @@ type SkillService struct {
 	nsSvc        *NamespaceService
 	sigVerifier  security.SignatureVerifier
 	notifSvc     *NotificationService
+	bgCtx        context.Context
 	// metrics 由嵌入方通过 SetMetrics 注入；nil 时走 metrics.Default 单例。
 	// 阶段 2 改造：避免直接读包级全局变量，便于宿主进程隔离指标命名空间。
 	metrics *metrics.Metrics
@@ -75,6 +76,19 @@ func (s *SkillService) loggerOrDefault() *slog.Logger {
 		return s.logger
 	}
 	return slog.Default()
+}
+
+// SetBackgroundContext controls best-effort async work spawned by the service.
+// Nil resets it to context.Background().
+func (s *SkillService) SetBackgroundContext(ctx context.Context) {
+	s.bgCtx = ctx
+}
+
+func (s *SkillService) backgroundContext() context.Context {
+	if s.bgCtx != nil {
+		return s.bgCtx
+	}
+	return context.Background()
 }
 
 // invalidateSkillCache clears both bare-slug and namespace-qualified cache entries
@@ -566,8 +580,9 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		// Snapshot the logger outside the goroutine so the closure doesn't
 		// race with a (hypothetical) future SetLogger call mid-flight.
 		lg := s.loggerOrDefault()
+		bgCtx := s.backgroundContext()
 		go func() {
-			if err := s.mirrorSvc.PushMirror(context.Background(), user.Handle, req.Slug); err != nil {
+			if err := s.mirrorSvc.PushMirror(bgCtx, user.Handle, req.Slug); err != nil {
 				lg.Warn("mirror push failed", "owner", user.Handle, "slug", req.Slug, "err", err)
 			}
 		}()
@@ -584,8 +599,9 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 	if nsID != nil && s.notifSvc != nil && s.nsSvc != nil {
 		capturedSkill := skill
 		capturedVer := ver
+		bgCtx := s.backgroundContext()
 		go func() {
-			members, err := s.nsSvc.ListMemberIDs(context.Background(), *nsID)
+			members, err := s.nsSvc.ListMemberIDs(bgCtx, *nsID)
 			if err != nil {
 				return
 			}
@@ -595,7 +611,7 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 				if memberID == user.ID {
 					continue
 				}
-				s.notifSvc.Notify(context.Background(), memberID, "publish", title, "", link)
+				s.notifSvc.Notify(bgCtx, memberID, "publish", title, "", link)
 			}
 		}()
 	}

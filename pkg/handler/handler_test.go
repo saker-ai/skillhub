@@ -66,10 +66,10 @@ func (m *mockSkillService) GetVersion(ctx context.Context, ref model.SkillRef, v
 }
 
 type mockSearchService struct {
-	searchFn func(ctx context.Context, query string, limit, offset int, sort []string, filters string) (*search.SearchResult, error)
+	searchFn func(ctx context.Context, query string, limit, offset int, sort []string, filters []search.Filter) (*search.SearchResult, error)
 }
 
-func (m *mockSearchService) Search(ctx context.Context, query string, limit, offset int, sort []string, filters string) (*search.SearchResult, error) {
+func (m *mockSearchService) Search(ctx context.Context, query string, limit, offset int, sort []string, filters []search.Filter) (*search.SearchResult, error) {
 	if m.searchFn != nil {
 		return m.searchFn(ctx, query, limit, offset, sort, filters)
 	}
@@ -77,6 +77,15 @@ func (m *mockSearchService) Search(ctx context.Context, query string, limit, off
 }
 
 // --- Test helpers ---
+
+func hasSearchFilter(filters []search.Filter, field string, value interface{}) bool {
+	for _, filter := range filters {
+		if filter.Field == field && filter.Value == value {
+			return true
+		}
+	}
+	return false
+}
 
 func testSkill() model.SkillWithOwner {
 	name := "Test Skill"
@@ -320,15 +329,17 @@ func TestWebHandler_SkillDetail_NotFound(t *testing.T) {
 
 func TestWebHandler_Search_WithQuery(t *testing.T) {
 	searchMock := &mockSearchService{
-		searchFn: func(_ context.Context, query string, limit, offset int, _ []string, filters string) (*search.SearchResult, error) {
+		searchFn: func(_ context.Context, query string, limit, offset int, _ []string, filters []search.Filter) (*search.SearchResult, error) {
 			if query != "golang" {
 				t.Errorf("query = %q, want 'golang'", query)
 			}
 			if limit != 20 {
 				t.Errorf("limit = %d, want 20", limit)
 			}
-			if !strings.Contains(filters, "visibility = public") || !strings.Contains(filters, "moderationStatus = approved") {
-				t.Errorf("filters should include visibility and moderation check: %q", filters)
+			if !hasSearchFilter(filters, "visibility", "public") ||
+				!hasSearchFilter(filters, "moderationStatus", "approved") ||
+				!hasSearchFilter(filters, "isDeleted", false) {
+				t.Errorf("filters should include public approved visibility checks: %#v", filters)
 			}
 			return &search.SearchResult{
 				Hits:             []map[string]interface{}{{"slug": "go-skill"}},

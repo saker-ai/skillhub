@@ -249,7 +249,7 @@ func TestIntegration_SkillDetailError(t *testing.T) {
 
 func TestIntegration_SearchWithResults(t *testing.T) {
 	searchSvc := &mockSearchService{
-		searchFn: func(_ context.Context, query string, _, _ int, _ []string, _ string) (*search.SearchResult, error) {
+		searchFn: func(_ context.Context, query string, _, _ int, _ []string, _ []search.Filter) (*search.SearchResult, error) {
 			return &search.SearchResult{
 				Hits: []map[string]interface{}{
 					{"slug": "found-skill", "displayName": "Found Skill"},
@@ -292,7 +292,7 @@ func TestIntegration_SearchNoQuery(t *testing.T) {
 
 func TestIntegration_SearchError(t *testing.T) {
 	searchSvc := &mockSearchService{
-		searchFn: func(_ context.Context, _ string, _, _ int, _ []string, _ string) (*search.SearchResult, error) {
+		searchFn: func(_ context.Context, _ string, _, _ int, _ []string, _ []search.Filter) (*search.SearchResult, error) {
 			return nil, fmt.Errorf("meilisearch down")
 		},
 	}

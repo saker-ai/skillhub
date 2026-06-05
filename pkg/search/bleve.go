@@ -159,8 +159,13 @@ type SearchResult struct {
 	EstimatedTotal   int64                    `json:"estimatedTotalHits"`
 }
 
+type Filter struct {
+	Field string
+	Value interface{}
+}
+
 // Search performs a full-text search with optional sorting and filtering.
-func (c *Client) Search(ctx context.Context, query string, limit, offset int, sort []string, filters string) (*SearchResult, error) {
+func (c *Client) Search(ctx context.Context, query string, limit, offset int, sort []string, filters []Filter) (*SearchResult, error) {
 	q := bleve.NewMatchQuery(query)
 	searchReq := bleve.NewSearchRequestOptions(q, limit, offset, false)
 	searchReq.Fields = []string{"*"}
@@ -186,34 +191,24 @@ func (c *Client) Search(ctx context.Context, query string, limit, offset int, so
 		searchReq.SortByCustom(sortOrder)
 	}
 
-	// Apply filters by wrapping the query in a conjunction with term queries
-	if filters != "" {
+	if len(filters) > 0 {
 		finalQuery := bleve.NewConjunctionQuery(q)
-		parts := strings.Split(filters, " AND ")
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if part == "" {
+		for _, filter := range filters {
+			if filter.Field == "" {
 				continue
 			}
-			kv := strings.SplitN(part, " = ", 2)
-			if len(kv) != 2 {
-				continue
-			}
-			field := strings.TrimSpace(kv[0])
-			value := strings.TrimSpace(kv[1])
-
-			switch value {
-			case "true":
-				bq := bleve.NewBoolFieldQuery(true)
-				bq.SetField(field)
+			switch value := filter.Value.(type) {
+			case bool:
+				bq := bleve.NewBoolFieldQuery(value)
+				bq.SetField(filter.Field)
 				finalQuery.AddQuery(bq)
-			case "false":
-				bq := bleve.NewBoolFieldQuery(false)
-				bq.SetField(field)
-				finalQuery.AddQuery(bq)
-			default:
+			case string:
 				tq := bleve.NewTermQuery(value)
-				tq.SetField(field)
+				tq.SetField(filter.Field)
+				finalQuery.AddQuery(tq)
+			default:
+				tq := bleve.NewTermQuery(fmt.Sprint(value))
+				tq.SetField(filter.Field)
 				finalQuery.AddQuery(tq)
 			}
 		}

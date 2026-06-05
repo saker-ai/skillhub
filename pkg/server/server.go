@@ -93,6 +93,8 @@ type Server struct {
 	rateLimiter  *middleware.RateLimiter
 	logger       *slog.Logger
 	metrics      *metrics.Metrics
+	bgCtx        context.Context
+	bgCancel     context.CancelFunc
 
 	// 中间件 / NoRoute 等需要直接访问的服务依赖。
 	authSvc   *auth.Service
@@ -237,7 +239,10 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 	auditSvc.SetLogger(lg)
 
 	// Service — 注入 metrics 实例避免直接读包级全局。
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+
 	skillSvc := service.NewSkillService(db, skillRepo, versionRepo, userRepo, downloadRepo, starRepo, fileStore, searchClient, mirrorSvc, auditSvc)
+	skillSvc.SetBackgroundContext(bgCtx)
 	skillSvc.SetMetrics(mx)
 	skillSvc.SetLogger(lg)
 
@@ -332,7 +337,7 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 	// Mirror push on startup if configured
 	if mirrorSvc.Enabled() && cfg.GitStore.Mirror.PushOnStartup {
 		go func() {
-			if err := mirrorSvc.PushAll(context.Background()); err != nil {
+			if err := mirrorSvc.PushAll(bgCtx); err != nil {
 				lg.Error("mirror push on startup failed", "err", err)
 			}
 		}()
@@ -342,7 +347,7 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 	// existing documents. Async to avoid blocking server readiness.
 	if searchClient != nil {
 		go func() {
-			n, err := skillSvc.ReindexAll(context.Background())
+			n, err := skillSvc.ReindexAll(bgCtx)
 			if err != nil {
 				lg.Error("search reindex on startup failed", "err", err)
 			} else if n > 0 {
@@ -360,6 +365,8 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 		rateLimiter:  rateLimiter,
 		logger:       lg,
 		metrics:      mx,
+		bgCtx:        bgCtx,
+		bgCancel:     bgCancel,
 		authSvc:      authSvc,
 		mirrorSvc:    mirrorSvc,
 		idp:          idp,
@@ -418,6 +425,9 @@ func (s *Server) NewDefaultEngine() *gin.Engine {
 // 直接复用 Server 的嵌入方需自行保证不重复调用本方法。
 func (s *Server) Shutdown(ctx context.Context) error {
 	var firstErr error
+	if s.bgCancel != nil {
+		s.bgCancel()
+	}
 	if s.httpServer != nil {
 		if err := s.httpServer.Shutdown(ctx); err != nil {
 			firstErr = err

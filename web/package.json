@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "SkillHub Web UI",
   "license": "MIT",
+  "packageManager": "npm@10.9.7",
   "type": "module",
   "scripts": {
     "dev": "vite",

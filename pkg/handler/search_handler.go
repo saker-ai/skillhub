@@ -55,12 +55,16 @@ func (h *SearchHandler) Search(c *gin.Context) {
 		sortFields = []string{s}
 	}
 
-	filters := "visibility = public AND moderationStatus = approved AND isDeleted = false"
+	filters := []search.Filter{
+		{Field: "visibility", Value: "public"},
+		{Field: "moderationStatus", Value: "approved"},
+		{Field: "isDeleted", Value: false},
+	}
 	if docType := c.Query("type"); docType == "skill" || docType == "plugin" {
-		filters += " AND docType = " + docType
+		filters = append(filters, search.Filter{Field: "docType", Value: docType})
 	}
 	if ns := c.Query("namespace"); ns != "" {
-		filters += " AND namespaceSlug = " + ns
+		filters = append(filters, search.Filter{Field: "namespaceSlug", Value: ns})
 	}
 
 	result, err := h.searchClient.Search(c.Request.Context(), query, limit, offset, sortFields, filters)
