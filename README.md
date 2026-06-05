@@ -136,6 +136,29 @@ skillhub plugin publish ./my-plugin \
   --summary "Productivity tools bundle"
 ```
 
+Codex-style plugin directories with `.codex-plugin/plugin.json` are accepted by
+the CLI; it uploads that manifest as the registry's root `plugin.json` while
+preserving the original files. Install downloaded plugins into `~/plugins` by
+default, or set `plugins_dir` in `~/.skillhub/config.yaml`.
+
+```bash
+skillhub plugin list
+skillhub plugin inspect my-plugin
+skillhub plugin install my-plugin --version latest
+skillhub plugin update --all
+skillhub plugin delete my-plugin
+skillhub plugin undelete my-plugin
+skillhub plugin yank my-plugin 1.0.0 --reason "broken release"
+skillhub plugin unyank my-plugin 1.0.0
+```
+
+Namespace-qualified plugin refs use the same `@namespace/slug` shape as skills:
+
+```bash
+skillhub plugin publish ./my-plugin --namespace acme
+skillhub plugin install @acme/my-plugin
+```
+
 ### Plugin API
 
 | Method | Path | Description |

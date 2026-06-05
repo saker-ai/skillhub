@@ -1,6 +1,8 @@
 package cli_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -10,12 +12,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub"
 	"github.com/saker-ai/skillhub/pkg/cli"
 	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/saker-ai/skillhub/pkg/model"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
 	// Blank import: matches cmd/skillhub/main.go default backend wiring.
 	_ "github.com/saker-ai/skillhub/pkg/store/git"
@@ -29,6 +31,89 @@ import (
 // owner/admin namespace role, not a token-scope check).
 type stubIDP struct {
 	user *model.User
+}
+
+func TestCLI_Plugins_Lifecycle(t *testing.T) {
+	t.Parallel()
+	owner := &model.User{ID: uuid.New(), Handle: "alice", Role: "user"}
+	srv := startTestRegistry(t, owner)
+	c := cli.NewClient(&cli.CLIConfig{Registry: srv.URL, Token: "alice-token"})
+
+	files := map[string][]byte{
+		"plugin.json": []byte(`{"name":"demo-plugin","version":"1.0.0"}`),
+		"README.md":   []byte("# demo plugin"),
+	}
+	created, err := c.PublishPlugin("demo-plugin", "1.0.0", "summary", "codex,test", "initial", "general", "acme", files)
+	if err != nil {
+		t.Fatalf("PublishPlugin: %v", err)
+	}
+	if p, _ := created["plugin"].(map[string]interface{}); p == nil || p["slug"] != "demo-plugin" {
+		t.Fatalf("publish response plugin = %+v", created["plugin"])
+	}
+
+	listed, err := c.ListPlugins("created", 20)
+	if err != nil {
+		t.Fatalf("ListPlugins: %v", err)
+	}
+	rows, _ := listed["data"].([]interface{})
+	if len(rows) == 0 {
+		t.Fatalf("ListPlugins returned no rows")
+	}
+	first, _ := rows[0].(map[string]interface{})
+	if first == nil || first["namespaceSlug"] != "acme" {
+		t.Fatalf("ListPlugins row = %+v, want namespaceSlug=acme", first)
+	}
+
+	got, err := c.GetPlugin("@acme/demo-plugin")
+	if err != nil {
+		t.Fatalf("GetPlugin: %v", err)
+	}
+	if got["slug"] != "demo-plugin" || got["namespaceSlug"] != "acme" {
+		t.Fatalf("GetPlugin = %+v", got)
+	}
+
+	versions, err := c.GetPluginVersions("@acme/demo-plugin")
+	if err != nil {
+		t.Fatalf("GetPluginVersions: %v", err)
+	}
+	vRows, _ := versions["versions"].([]interface{})
+	if len(vRows) != 1 {
+		t.Fatalf("versions length = %d, want 1", len(vRows))
+	}
+
+	data, err := c.GetPluginFile("@acme/demo-plugin", "1.0.0", "README.md")
+	if err != nil {
+		t.Fatalf("GetPluginFile: %v", err)
+	}
+	if string(data) != "# demo plugin" {
+		t.Fatalf("README content = %q", data)
+	}
+
+	zipBody, err := c.DownloadPlugin("@acme/demo-plugin", "1.0.0")
+	if err != nil {
+		t.Fatalf("DownloadPlugin: %v", err)
+	}
+	zipData, err := io.ReadAll(zipBody)
+	_ = zipBody.Close()
+	if err != nil {
+		t.Fatalf("read plugin zip: %v", err)
+	}
+	if _, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData))); err != nil {
+		t.Fatalf("downloaded plugin is not a zip: %v", err)
+	}
+
+	if err := c.YankPluginVersion("@acme/demo-plugin", "1.0.0", "broken"); err != nil {
+		t.Fatalf("YankPluginVersion: %v", err)
+	}
+	if err := c.UnyankPluginVersion("@acme/demo-plugin", "1.0.0"); err != nil {
+		t.Fatalf("UnyankPluginVersion: %v", err)
+	}
+	if err := c.DeletePlugin("@acme/demo-plugin"); err != nil {
+		t.Fatalf("DeletePlugin: %v", err)
+	}
+	if err := c.UndeletePlugin("@acme/demo-plugin"); err != nil {
+		t.Fatalf("UndeletePlugin: %v", err)
+	}
 }
 
 func (s *stubIDP) Identify(_ context.Context, r *http.Request) (*model.User, string, *uuid.UUID, error) {

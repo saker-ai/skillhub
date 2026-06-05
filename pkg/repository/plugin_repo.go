@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/google/uuid"
+	"github.com/saker-ai/skillhub/pkg/model"
 	"gorm.io/gorm"
 )
 
@@ -78,6 +78,21 @@ func (r *PluginRepo) GetByNSAndSlug(ctx context.Context, namespaceID uuid.UUID, 
 	return &p, err
 }
 
+func (r *PluginRepo) GetByNSAndSlugIncludeDeleted(ctx context.Context, namespaceID uuid.UUID, slug string) (*model.PluginWithOwner, error) {
+	var p model.PluginWithOwner
+	err := r.db.WithContext(ctx).
+		Table("plugins").
+		Select(pluginWithOwnerSelect).
+		Joins("LEFT JOIN users ON users.id = plugins.owner_id").
+		Joins("LEFT JOIN namespaces ON namespaces.id = plugins.namespace_id").
+		Where("plugins.namespace_id = ? AND plugins.slug = ?", namespaceID, slug).
+		First(&p).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &p, err
+}
+
 // GetBySlugGlobal returns all non-deleted plugins matching a slug across namespaces.
 func (r *PluginRepo) GetBySlugGlobal(ctx context.Context, slug string) ([]model.PluginWithOwner, error) {
 	var plugins []model.PluginWithOwner
@@ -87,6 +102,18 @@ func (r *PluginRepo) GetBySlugGlobal(ctx context.Context, slug string) ([]model.
 		Joins("LEFT JOIN users ON users.id = plugins.owner_id").
 		Joins("LEFT JOIN namespaces ON namespaces.id = plugins.namespace_id").
 		Where("plugins.slug = ? AND plugins.soft_deleted_at IS NULL", slug).
+		Find(&plugins).Error
+	return plugins, err
+}
+
+func (r *PluginRepo) GetBySlugGlobalIncludeDeleted(ctx context.Context, slug string) ([]model.PluginWithOwner, error) {
+	var plugins []model.PluginWithOwner
+	err := r.db.WithContext(ctx).
+		Table("plugins").
+		Select(pluginWithOwnerSelect).
+		Joins("LEFT JOIN users ON users.id = plugins.owner_id").
+		Joins("LEFT JOIN namespaces ON namespaces.id = plugins.namespace_id").
+		Where("plugins.slug = ?", slug).
 		Find(&plugins).Error
 	return plugins, err
 }
@@ -116,8 +143,9 @@ func (r *PluginRepo) List(ctx context.Context, opts PluginListOptions) ([]model.
 
 	q := r.db.WithContext(ctx).
 		Table("plugins").
-		Select("plugins.*, users.handle as owner_handle, users.avatar_url as owner_avatar_url").
+		Select(pluginWithOwnerSelect).
 		Joins("LEFT JOIN users ON users.id = plugins.owner_id").
+		Joins("LEFT JOIN namespaces ON namespaces.id = plugins.namespace_id").
 		Where("plugins.soft_deleted_at IS NULL").
 		Where("plugins.visibility = 'public'").
 		Where("plugins.moderation_status = 'approved'")

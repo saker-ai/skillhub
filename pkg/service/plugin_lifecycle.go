@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/google/uuid"
+	"github.com/saker-ai/skillhub/pkg/model"
 )
 
 func (s *PluginService) SoftDelete(ctx context.Context, user *model.User, slug string) error {
@@ -23,10 +23,14 @@ func (s *PluginService) SoftDelete(ctx context.Context, user *model.User, slug s
 }
 
 func (s *PluginService) Undelete(ctx context.Context, user *model.User, slug string) error {
-	p, err := s.pluginRepo.GetBySlugIncludeDeleted(ctx, slug)
+	pwo, err := s.resolvePluginRef(ctx, slug, true)
 	if err != nil {
+		return err
+	}
+	if pwo == nil {
 		return fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
 	}
+	p := &pwo.Plugin
 	if p.OwnerID != user.ID && !user.IsAdmin() {
 		return fmt.Errorf("%w: not the plugin owner", ErrForbidden)
 	}
@@ -87,10 +91,14 @@ func (s *PluginService) ListAllForAdmin(ctx context.Context, limit int, cursor, 
 }
 
 func (s *PluginService) ReviewPlugin(ctx context.Context, reviewerID *uuid.UUID, slug string, approve bool) error {
-	p, err := s.pluginRepo.GetBySlug(ctx, slug)
+	pwo, err := s.resolvePluginRef(ctx, slug, false)
 	if err != nil {
+		return err
+	}
+	if pwo == nil {
 		return fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
 	}
+	p := &pwo.Plugin
 	status := "rejected"
 	visibility := p.Visibility
 	if approve {
@@ -111,10 +119,14 @@ func (s *PluginService) ReviewPlugin(ctx context.Context, reviewerID *uuid.UUID,
 }
 
 func (s *PluginService) SetPluginVisibility(ctx context.Context, adminID *uuid.UUID, slug, visibility string) error {
-	p, err := s.pluginRepo.GetBySlug(ctx, slug)
+	pwo, err := s.resolvePluginRef(ctx, slug, false)
 	if err != nil {
+		return err
+	}
+	if pwo == nil {
 		return fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
 	}
+	p := &pwo.Plugin
 	if visibility != "public" && visibility != "private" {
 		return fmt.Errorf("%w: visibility must be 'public' or 'private'", ErrValidation)
 	}
@@ -128,10 +140,14 @@ func (s *PluginService) SetPluginVisibility(ctx context.Context, adminID *uuid.U
 }
 
 func (s *PluginService) lookupOwnedPlugin(ctx context.Context, user *model.User, slug string) (*model.Plugin, error) {
-	p, err := s.pluginRepo.GetBySlug(ctx, slug)
+	pwo, err := s.resolvePluginRef(ctx, slug, false)
 	if err != nil {
+		return nil, err
+	}
+	if pwo == nil {
 		return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
 	}
+	p := &pwo.Plugin
 	if p.OwnerID != user.ID && !user.IsAdmin() {
 		return nil, fmt.Errorf("%w: not the plugin owner", ErrForbidden)
 	}

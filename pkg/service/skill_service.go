@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub/pkg/gitstore"
 	"github.com/saker-ai/skillhub/pkg/metrics"
 	"github.com/saker-ai/skillhub/pkg/model"
@@ -20,7 +21,6 @@ import (
 	"github.com/saker-ai/skillhub/pkg/security"
 	"github.com/saker-ai/skillhub/pkg/semver"
 	"github.com/saker-ai/skillhub/pkg/store"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -545,35 +545,7 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 	// 读到的是新 latest_version_id / metadata。
 	s.invalidateSkillCache(skill)
 
-	// Index to search
-	if s.searchClient != nil {
-		skillMdContent := ""
-		if content, ok := req.Files["SKILL.md"]; ok {
-			skillMdContent = string(content)
-		}
-		doc := &search.SkillDocument{
-			ID:               skill.ID.String(),
-			Slug:             skill.Slug,
-			DisplayName:      derefStr(skill.DisplayName),
-			Summary:          derefStr(skill.Summary),
-			SkillMdContent:   skillMdContent,
-			Category:         skill.Category,
-			Tags:             []string(skill.Tags),
-			OwnerHandle:      skill.OwnerHandle,
-			NamespaceSlug:    req.NamespaceSlug,
-			Visibility:       skill.Visibility,
-			ModerationStatus: skill.ModerationStatus,
-			IsSuspicious:     skill.IsSuspicious,
-			IsDeleted:        skill.SoftDeletedAt != nil,
-			Downloads:        skill.Downloads,
-			Stars:            skill.StarsCount,
-			UpdatedAt:        skill.UpdatedAt.Unix(),
-			CreatedAt:        skill.CreatedAt.Unix(),
-		}
-		if err := s.searchClient.IndexSkill(ctx, doc); err != nil {
-			s.loggerOrDefault().Warn("failed to index skill to search", "err", err)
-		}
-	}
+	s.indexSkill(ctx, skill, req.NamespaceSlug, req.Files)
 
 	// Mirror push (async)
 	if s.mirrorSvc != nil && s.mirrorSvc.Enabled() {
@@ -860,7 +832,12 @@ func (s *SkillService) SetSkillVisibility(ctx context.Context, adminID *uuid.UUI
 	if err := s.skillRepo.SetVisibility(ctx, skill.ID, visibility, moderationStatus); err != nil {
 		return err
 	}
-	s.invalidateSkillCache(skill)
+	updated, err := s.resolveSkillRef(ctx, ref)
+	if err != nil || updated == nil {
+		return fmt.Errorf("skill not found")
+	}
+	s.invalidateSkillCache(updated)
+	s.indexSkill(ctx, updated, updated.NamespaceSlug, nil)
 	if s.auditSvc != nil {
 		s.auditSvc.Log(ctx, adminID, "set_visibility", "skill", &skill.ID, visibility, "")
 	}
@@ -876,6 +853,41 @@ func (s *SkillService) SetSkillVisibility(ctx context.Context, adminID *uuid.UUI
 //   - N matches → return AmbiguousSlugError (maps to 409)
 func (s *SkillService) resolveSkillRef(ctx context.Context, ref model.SkillRef) (*model.SkillWithOwner, error) {
 	return resolveSkillRefWith(ctx, ref, s.skillRepo, s.nsSvc)
+}
+
+func (s *SkillService) resolveSkillRefIncludeDeleted(ctx context.Context, ref model.SkillRef) (*model.SkillWithOwner, error) {
+	if ref.IsQualified() {
+		if s.nsSvc == nil {
+			return nil, nil
+		}
+		ns, err := s.nsSvc.GetBySlug(ctx, ref.Namespace)
+		if err != nil || ns == nil {
+			return nil, nil
+		}
+		return s.skillRepo.GetByNSAndSlugIncludeDeleted(ctx, ns.ID, ref.Slug)
+	}
+
+	all, err := s.skillRepo.GetBySlugGlobalIncludeDeleted(ctx, ref.Slug)
+	if err != nil {
+		return nil, err
+	}
+	switch len(all) {
+	case 0:
+		return nil, nil
+	case 1:
+		return &all[0], nil
+	default:
+		candidates := make([]AmbiguousCandidate, 0, len(all))
+		for i := range all {
+			candidates = append(candidates, AmbiguousCandidate{
+				Namespace:   all[i].NamespaceSlug,
+				Slug:        all[i].Slug,
+				OwnerHandle: all[i].OwnerHandle,
+				SkillID:     all[i].ID.String(),
+			})
+		}
+		return nil, &AmbiguousSlugError{Slug: ref.Slug, Candidates: candidates}
+	}
 }
 
 // canViewSkill checks if a viewer has access to a skill.
@@ -964,7 +976,7 @@ func (s *SkillService) PurgeByRef(ctx context.Context, user *model.User, ref mod
 
 // Undelete restores a soft-deleted skill. tokenNS 语义同 SoftDelete。
 func (s *SkillService) Undelete(ctx context.Context, user *model.User, ref model.SkillRef, tokenNS *uuid.UUID) error {
-	skill, err := s.resolveSkillRef(ctx, ref)
+	skill, err := s.resolveSkillRefIncludeDeleted(ctx, ref)
 	if err != nil {
 		return err
 	}
@@ -1169,31 +1181,51 @@ func (s *SkillService) ReindexAll(ctx context.Context) (int, error) {
 	count := 0
 	for i := range skills {
 		sk := &skills[i]
-		doc := &search.SkillDocument{
-			ID:               sk.ID.String(),
-			Slug:             sk.Slug,
-			DisplayName:      derefStr(sk.DisplayName),
-			Summary:          derefStr(sk.Summary),
-			Category:         sk.Category,
-			Tags:             []string(sk.Tags),
-			OwnerHandle:      sk.OwnerHandle,
-			NamespaceSlug:    sk.NamespaceSlug,
-			Visibility:       sk.Visibility,
-			ModerationStatus: sk.ModerationStatus,
-			IsSuspicious:     sk.IsSuspicious,
-			IsDeleted:        sk.SoftDeletedAt != nil,
-			Downloads:        sk.Downloads,
-			Stars:            sk.StarsCount,
-			UpdatedAt:        sk.UpdatedAt.Unix(),
-			CreatedAt:        sk.CreatedAt.Unix(),
+		if s.indexSkill(ctx, sk, sk.NamespaceSlug, nil) {
+			count++
 		}
-		if err := s.searchClient.IndexSkill(ctx, doc); err != nil {
-			s.loggerOrDefault().Warn("reindex skill failed", "slug", sk.Slug, "err", err)
-			continue
-		}
-		count++
 	}
 	return count, nil
+}
+
+func (s *SkillService) indexSkill(ctx context.Context, skill *model.SkillWithOwner, namespaceSlug string, files map[string][]byte) bool {
+	if s.searchClient == nil || skill == nil {
+		return false
+	}
+	skillMdContent := ""
+	if content, ok := files["SKILL.md"]; ok {
+		skillMdContent = string(content)
+	} else if skill.LatestVersionID != nil {
+		if latest, err := s.versionRepo.GetByID(ctx, *skill.LatestVersionID); err == nil && latest != nil {
+			if content, err := s.fileStore.GetFile(ctx, skill.OwnerHandle, skill.Slug, latest.Version, "SKILL.md"); err == nil {
+				skillMdContent = string(content)
+			}
+		}
+	}
+	doc := &search.SkillDocument{
+		ID:               skill.ID.String(),
+		Slug:             skill.Slug,
+		DisplayName:      derefStr(skill.DisplayName),
+		Summary:          derefStr(skill.Summary),
+		SkillMdContent:   skillMdContent,
+		Category:         skill.Category,
+		Tags:             []string(skill.Tags),
+		OwnerHandle:      skill.OwnerHandle,
+		NamespaceSlug:    namespaceSlug,
+		Visibility:       skill.Visibility,
+		ModerationStatus: skill.ModerationStatus,
+		IsSuspicious:     skill.IsSuspicious,
+		IsDeleted:        skill.SoftDeletedAt != nil,
+		Downloads:        skill.Downloads,
+		Stars:            skill.StarsCount,
+		UpdatedAt:        skill.UpdatedAt.Unix(),
+		CreatedAt:        skill.CreatedAt.Unix(),
+	}
+	if err := s.searchClient.IndexSkill(ctx, doc); err != nil {
+		s.loggerOrDefault().Warn("failed to index skill to search", "slug", skill.Slug, "err", err)
+		return false
+	}
+	return true
 }
 
 func extractFrontmatter(content []byte) json.RawMessage {

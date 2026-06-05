@@ -23,8 +23,9 @@ export default function Plugins() {
       const res = await listPlugins(PAGE_SIZE, cursor, '', sort);
       setPlugins(res.data || []);
       setHasNext(!!res.nextCursor);
-      if (res.nextCursor && page >= cursors.length - 1) {
+      if (res.nextCursor) {
         setCursors(prev => {
+          if (page < prev.length - 1) return prev;
           const next = [...prev];
           next[page + 1] = res.nextCursor;
           return next;
@@ -35,11 +36,11 @@ export default function Plugins() {
     } finally {
       setLoading(false);
     }
-  }, [cursors.length, sort]);
+  }, [sort]);
 
   useEffect(() => {
     loadPage(0, '');
-  }, [sort]);
+  }, [loadPage]);
 
   const goToPage = (page: number) => {
     setCurrentPage(page);

@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/saker-ai/skillhub/pkg/middleware"
 	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/saker-ai/skillhub/pkg/repository"
 	"github.com/saker-ai/skillhub/pkg/service"
-	"github.com/gin-gonic/gin"
 )
 
 type PluginHandler struct {
@@ -18,6 +19,23 @@ type PluginHandler struct {
 
 func NewPluginHandler(svc *service.PluginService) *PluginHandler {
 	return &PluginHandler{svc: svc}
+}
+
+func extractPluginRef(c *gin.Context) string {
+	ns := c.Param("namespace")
+	slug := c.Param("slug")
+	if ns != "" {
+		return "@" + strings.TrimPrefix(ns, "@") + "/" + slug
+	}
+	return slug
+}
+
+func pluginQueryRef(c *gin.Context) string {
+	slug := c.Query("slug")
+	if ns := c.Query("namespace"); ns != "" {
+		return "@" + ns + "/" + slug
+	}
+	return slug
 }
 
 // POST /api/v1/plugins
@@ -40,6 +58,7 @@ func (h *PluginHandler) Publish(c *gin.Context) {
 	}
 	input.OwnerID = user.ID
 	input.User = user
+	input.TokenNamespace = middleware.GetTokenNamespace(c)
 	if ns := c.PostForm("namespace"); ns != "" {
 		input.NamespaceSlug = ns
 	}
@@ -84,8 +103,7 @@ func (h *PluginHandler) List(c *gin.Context) {
 
 // GET /api/v1/plugins/:slug
 func (h *PluginHandler) Get(c *gin.Context) {
-	slug := c.Param("slug")
-	p, err := h.svc.Get(c.Request.Context(), slug)
+	p, err := h.svc.Get(c.Request.Context(), extractPluginRef(c))
 	if err != nil {
 		writeServiceError(c, err)
 		return
@@ -95,8 +113,7 @@ func (h *PluginHandler) Get(c *gin.Context) {
 
 // GET /api/v1/plugins/:slug/versions
 func (h *PluginHandler) Versions(c *gin.Context) {
-	slug := c.Param("slug")
-	versions, err := h.svc.Versions(c.Request.Context(), slug)
+	versions, err := h.svc.Versions(c.Request.Context(), extractPluginRef(c))
 	if err != nil {
 		writeServiceError(c, err)
 		return
@@ -106,16 +123,16 @@ func (h *PluginHandler) Versions(c *gin.Context) {
 
 // GET /api/v1/plugins/file?slug=x&version=y&path=z
 func (h *PluginHandler) GetFile(c *gin.Context) {
-	slug := c.Query("slug")
+	ref := pluginQueryRef(c)
 	version := c.Query("version")
 	filePath := c.Query("path")
 
-	if slug == "" || filePath == "" {
+	if ref == "" || filePath == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "slug and path are required"})
 		return
 	}
 
-	data, err := h.svc.GetFile(c.Request.Context(), slug, version, filePath)
+	data, err := h.svc.GetFile(c.Request.Context(), ref, version, filePath)
 	if err != nil {
 		writeServiceError(c, err)
 		return
@@ -127,15 +144,15 @@ func (h *PluginHandler) GetFile(c *gin.Context) {
 
 // GET /api/v1/plugins/download?slug=x&version=y
 func (h *PluginHandler) Download(c *gin.Context) {
-	slug := c.Query("slug")
+	ref := pluginQueryRef(c)
 	version := c.Query("version")
 
-	if slug == "" {
+	if ref == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "slug is required"})
 		return
 	}
 
-	reader, etag, err := h.svc.Download(c.Request.Context(), slug, version)
+	reader, etag, err := h.svc.Download(c.Request.Context(), ref, version)
 	if err != nil {
 		writeServiceError(c, err)
 		return
@@ -146,22 +163,23 @@ func (h *PluginHandler) Download(c *gin.Context) {
 		c.Header("ETag", etag)
 	}
 	c.Header("Content-Type", "application/zip")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", slug+".zip"))
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", c.Query("slug")+".zip"))
 	io.Copy(c.Writer, reader)
 }
 
 func pluginToJSON(p model.PluginWithOwner) gin.H {
 	result := gin.H{
-		"id":          p.ID,
-		"slug":        p.Slug,
-		"visibility":  p.Visibility,
-		"category":    p.Category,
-		"tags":        p.Tags,
-		"downloads":   p.Downloads,
-		"starsCount":  p.StarsCount,
-		"ownerHandle": p.OwnerHandle,
-		"createdAt":   p.CreatedAt,
-		"updatedAt":   p.UpdatedAt,
+		"id":            p.ID,
+		"slug":          p.Slug,
+		"visibility":    p.Visibility,
+		"category":      p.Category,
+		"tags":          p.Tags,
+		"downloads":     p.Downloads,
+		"starsCount":    p.StarsCount,
+		"ownerHandle":   p.OwnerHandle,
+		"namespaceSlug": p.NamespaceSlug,
+		"createdAt":     p.CreatedAt,
+		"updatedAt":     p.UpdatedAt,
 	}
 	if p.DisplayName != nil {
 		result["displayName"] = *p.DisplayName
@@ -182,8 +200,7 @@ func (h *PluginHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	slug := c.Param("slug")
-	if err := h.svc.SoftDelete(c.Request.Context(), user, slug); err != nil {
+	if err := h.svc.SoftDelete(c.Request.Context(), user, extractPluginRef(c)); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -196,8 +213,7 @@ func (h *PluginHandler) Undelete(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	slug := c.Param("slug")
-	if err := h.svc.Undelete(c.Request.Context(), user, slug); err != nil {
+	if err := h.svc.Undelete(c.Request.Context(), user, extractPluginRef(c)); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -210,13 +226,12 @@ func (h *PluginHandler) YankVersion(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	slug := c.Param("slug")
 	version := c.Param("version")
 	var body struct {
 		Reason string `json:"reason"`
 	}
 	_ = c.ShouldBindJSON(&body)
-	if err := h.svc.YankVersion(c.Request.Context(), user, slug, version, body.Reason); err != nil {
+	if err := h.svc.YankVersion(c.Request.Context(), user, extractPluginRef(c), version, body.Reason); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -229,9 +244,8 @@ func (h *PluginHandler) UnyankVersion(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
-	slug := c.Param("slug")
 	version := c.Param("version")
-	if err := h.svc.UnyankVersion(c.Request.Context(), user, slug, version); err != nil {
+	if err := h.svc.UnyankVersion(c.Request.Context(), user, extractPluginRef(c), version); err != nil {
 		writeServiceError(c, err)
 		return
 	}
