@@ -32,6 +32,12 @@ type PluginService struct {
 	searchClient *search.Client
 	auditSvc     *AuditService
 	logger       *slog.Logger
+	nsSvc        *NamespaceService
+}
+
+// SetNamespaceService injects namespace support for plugin publishing.
+func (s *PluginService) SetNamespaceService(ns *NamespaceService) {
+	s.nsSvc = ns
 }
 
 func (s *PluginService) loggerOrDefault() *slog.Logger {
@@ -53,15 +59,17 @@ func NewPluginService(db *gorm.DB, repo *repository.PluginRepo, fs store.Store, 
 }
 
 type PluginPublishInput struct {
-	Slug        string
-	Version     string
-	Category    string
-	DisplayName string
-	Summary     string
-	Changelog   string
-	Tags        []string
-	Files       map[string][]byte
-	OwnerID     uuid.UUID
+	Slug          string
+	Version       string
+	Category      string
+	DisplayName   string
+	Summary       string
+	Changelog     string
+	Tags          []string
+	Files         map[string][]byte
+	OwnerID       uuid.UUID
+	NamespaceSlug string
+	User          *model.User
 }
 
 type PluginPublishResult struct {
@@ -86,10 +94,41 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 		return nil, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
-	// Get or create plugin
-	existing, err := s.pluginRepo.GetBySlug(ctx, input.Slug)
-	if err != nil && !isNotFound(err) {
-		return nil, fmt.Errorf("lookup plugin: %w", err)
+	// Resolve namespace (same pattern as skills).
+	var nsID *uuid.UUID
+	if s.nsSvc != nil {
+		if input.NamespaceSlug != "" {
+			ns, err := s.nsSvc.GetBySlug(ctx, input.NamespaceSlug)
+			if err != nil || ns == nil {
+				return nil, fmt.Errorf("namespace '%s' not found", input.NamespaceSlug)
+			}
+			nsID = &ns.ID
+		} else if input.User != nil {
+			ns, err := s.nsSvc.EnsurePersonalNamespace(ctx, input.User)
+			if err != nil {
+				return nil, fmt.Errorf("ensure personal namespace: %w", err)
+			}
+			nsID = &ns.ID
+			input.NamespaceSlug = ns.Slug
+		}
+	}
+
+	// Get or create plugin (scoped to namespace if available)
+	var existing *model.Plugin
+	if nsID != nil {
+		p, err := s.pluginRepo.GetByNSAndSlug(ctx, *nsID, input.Slug)
+		if err != nil {
+			return nil, fmt.Errorf("lookup plugin: %w", err)
+		}
+		if p != nil {
+			existing = &p.Plugin
+		}
+	} else {
+		p, err := s.pluginRepo.GetBySlug(ctx, input.Slug)
+		if err != nil && !isNotFound(err) {
+			return nil, fmt.Errorf("lookup plugin: %w", err)
+		}
+		existing = p
 	}
 
 	var plug model.Plugin
@@ -100,12 +139,13 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 		plug = *existing
 	} else {
 		plug = model.Plugin{
-			ID:         uuid.New(),
-			Slug:       input.Slug,
-			OwnerID:    input.OwnerID,
-			Visibility: "public",
-			Category:   "general",
-			Tags:       model.StringArray{},
+			ID:          uuid.New(),
+			Slug:        input.Slug,
+			OwnerID:     input.OwnerID,
+			NamespaceID: nsID,
+			Visibility:  "public",
+			Category:    "general",
+			Tags:        model.StringArray{},
 		}
 		if err := s.pluginRepo.Create(ctx, &plug); err != nil {
 			return nil, fmt.Errorf("create plugin: %w", err)

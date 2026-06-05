@@ -51,8 +51,9 @@ type SkillVersion struct {
 
 // SkillDependency declares a required upstream skill at a version range.
 type SkillDependency struct {
-	Slug    string `json:"slug"`
-	Version string `json:"version"` // semver range expression
+	Slug      string `json:"slug"`
+	Namespace string `json:"namespace,omitempty"` // optional namespace qualifier
+	Version   string `json:"version"`             // semver range expression
 }
 
 func (SkillVersion) TableName() string { return "skill_versions" }

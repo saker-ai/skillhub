@@ -39,6 +39,7 @@ type SkillService struct {
 	auditSvc     *AuditService
 	nsSvc        *NamespaceService
 	sigVerifier  security.SignatureVerifier
+	notifSvc     *NotificationService
 	// metrics 由嵌入方通过 SetMetrics 注入；nil 时走 metrics.Default 单例。
 	// 阶段 2 改造：避免直接读包级全局变量，便于宿主进程隔离指标命名空间。
 	metrics *metrics.Metrics
@@ -89,6 +90,11 @@ func (s *SkillService) invalidateSkillCache(skill *model.SkillWithOwner) {
 // Optional — when nil, namespace-bound publishing is disabled.
 func (s *SkillService) SetNamespaceService(ns *NamespaceService) {
 	s.nsSvc = ns
+}
+
+// SetNotificationService injects the notification service for namespace publish notifications.
+func (s *SkillService) SetNotificationService(ns *NotificationService) {
+	s.notifSvc = ns
 }
 
 // SetSignatureVerifier injects a Sigstore-compatible verifier for publish-time
@@ -204,28 +210,29 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		if dep.Slug == "" {
 			return nil, nil, fmt.Errorf("dependency slug is required")
 		}
-		if dep.Slug == req.Slug {
+		if dep.Slug == req.Slug && dep.Namespace == "" {
 			return nil, nil, fmt.Errorf("dependency '%s' cannot depend on itself", dep.Slug)
 		}
 		if dep.Version == "" {
 			return nil, nil, fmt.Errorf("dependency '%s' requires a version range", dep.Slug)
 		}
-		depSkill, err := s.skillRepo.GetBySlugOrAlias(ctx, dep.Slug)
+		depRef := model.SkillRef{Slug: dep.Slug, Namespace: dep.Namespace}
+		depSkill, err := s.resolveSkillRef(ctx, depRef)
 		if err != nil {
-			return nil, nil, fmt.Errorf("lookup dependency '%s': %w", dep.Slug, err)
+			return nil, nil, fmt.Errorf("lookup dependency '%s': %w", depRef, err)
 		}
 		if depSkill == nil {
-			return nil, nil, fmt.Errorf("dependency '%s' not found", dep.Slug)
+			return nil, nil, fmt.Errorf("dependency '%s' not found", depRef)
 		}
 	}
 
 	// Resolve namespace. Every skill must belong to a namespace.
 	// When none specified, default to the user's personal namespace (lazy-created).
-	var nsID *uuid.UUID
+	if s.nsSvc == nil {
+		return nil, nil, fmt.Errorf("namespace publishing not configured on this server")
+	}
+	var resolvedNS *model.Namespace
 	if req.NamespaceSlug != "" {
-		if s.nsSvc == nil {
-			return nil, nil, fmt.Errorf("namespace publishing not configured on this server")
-		}
 		ns, err := s.nsSvc.GetBySlug(ctx, req.NamespaceSlug)
 		if err != nil || ns == nil {
 			return nil, nil, fmt.Errorf("namespace '%s' not found", req.NamespaceSlug)
@@ -237,29 +244,42 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		if !can && !user.IsAdmin() {
 			return nil, nil, fmt.Errorf("not a member of namespace '%s'", req.NamespaceSlug)
 		}
-		nsID = &ns.ID
+		resolvedNS = ns
 	} else {
-		// Default to personal namespace.
-		if s.nsSvc == nil {
-			return nil, nil, fmt.Errorf("namespace publishing not configured on this server")
-		}
 		ns, err := s.nsSvc.EnsurePersonalNamespace(ctx, user)
 		if err != nil {
 			return nil, nil, fmt.Errorf("ensure personal namespace: %w", err)
 		}
-		nsID = &ns.ID
+		resolvedNS = ns
 		req.NamespaceSlug = ns.Slug
 	}
+	nsID := &resolvedNS.ID
 
 	// 团队 token 必须指向自己 namespace,不允许借此发个人 skill 或别 namespace 的 skill。
 	if req.TokenNamespace != nil {
-		if nsID == nil || *nsID != *req.TokenNamespace {
+		if *nsID != *req.TokenNamespace {
 			return nil, nil, fmt.Errorf("%w: team token can only publish to its bound namespace", ErrForbidden)
 		}
 	}
 
-	// Validate visibility (only public/private allowed; defaults to private on create)
-	visibility := "private"
+	// Namespace quota check: reject if the namespace has reached its skill limit.
+	if resolvedNS.MaxSkills > 0 {
+		count, err := s.skillRepo.CountByNamespace(ctx, resolvedNS.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("check namespace quota: %w", err)
+		}
+		// Only check quota when creating a NEW skill (not re-publishing).
+		existingCheck, _ := s.skillRepo.GetByNSAndSlug(ctx, resolvedNS.ID, req.Slug)
+		if existingCheck == nil && int(count) >= resolvedNS.MaxSkills {
+			return nil, nil, fmt.Errorf("%w: namespace '%s' has reached its skill quota (%d)", ErrConflict, req.NamespaceSlug, resolvedNS.MaxSkills)
+		}
+	}
+
+	// Validate visibility (defaults to namespace's default visibility)
+	visibility := resolvedNS.DefaultVisibility
+	if visibility == "" {
+		visibility = "private"
+	}
 	if req.Visibility != "" {
 		if req.Visibility != "private" && req.Visibility != "public" {
 			return nil, nil, fmt.Errorf("visibility must be 'private' or 'public'")
@@ -553,6 +573,26 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 	}
 
 	s.metricsOrDefault().SkillPublished.WithLabelValues(skill.Visibility).Inc()
+
+	// Notify namespace members about the new version (async, best-effort).
+	if nsID != nil && s.notifSvc != nil && s.nsSvc != nil {
+		capturedSkill := skill
+		capturedVer := ver
+		go func() {
+			members, err := s.nsSvc.ListMemberIDs(context.Background(), *nsID)
+			if err != nil {
+				return
+			}
+			title := fmt.Sprintf("New version: @%s/%s v%s", req.NamespaceSlug, capturedSkill.Slug, capturedVer.Version)
+			link := fmt.Sprintf("/skills/@%s/%s", req.NamespaceSlug, capturedSkill.Slug)
+			for _, memberID := range members {
+				if memberID == user.ID {
+					continue
+				}
+				s.notifSvc.Notify(context.Background(), memberID, "publish", title, "", link)
+			}
+		}()
+	}
 
 	return skill, ver, nil
 }
@@ -963,6 +1003,60 @@ func (s *SkillService) Unstar(ctx context.Context, userID uuid.UUID, ref model.S
 	})
 }
 
+
+// TransferSkill moves a skill from its current namespace to a different one.
+// The caller must be owner/admin of the source namespace AND a member of the target namespace.
+func (s *SkillService) TransferSkill(ctx context.Context, user *model.User, ref model.SkillRef, targetNSSlug string, tokenNS *uuid.UUID) error {
+	skill, err := s.resolveSkillRef(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if skill == nil {
+		return fmt.Errorf("%w: skill not found", ErrNotFound)
+	}
+	if err := s.authorizeSkillWrite(skill.NamespaceID, skill.OwnerID, user, tokenNS); err != nil {
+		return err
+	}
+
+	if s.nsSvc == nil {
+		return fmt.Errorf("namespace service not configured")
+	}
+	targetNS, err := s.nsSvc.GetBySlug(ctx, targetNSSlug)
+	if err != nil || targetNS == nil {
+		return fmt.Errorf("%w: target namespace '%s' not found", ErrNotFound, targetNSSlug)
+	}
+	can, err := s.nsSvc.CanPublish(ctx, targetNSSlug, user.ID)
+	if err != nil {
+		return err
+	}
+	if !can && !user.IsAdmin() {
+		return fmt.Errorf("%w: not a member of target namespace '%s'", ErrForbidden, targetNSSlug)
+	}
+
+	// Check slug doesn't conflict in target namespace.
+	existing, err := s.skillRepo.GetByNSAndSlug(ctx, targetNS.ID, skill.Slug)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return fmt.Errorf("%w: slug '%s' already exists in namespace '%s'", ErrConflict, skill.Slug, targetNSSlug)
+	}
+
+	if err := s.db.WithContext(ctx).Model(&model.Skill{}).
+		Where("id = ?", skill.ID).
+		Update("namespace_id", targetNS.ID).Error; err != nil {
+		return fmt.Errorf("transfer skill: %w", err)
+	}
+
+	s.invalidateSkillCache(skill)
+	s.skillRepo.InvalidateCacheNS(targetNS.ID.String(), skill.Slug)
+
+	if s.auditSvc != nil {
+		s.auditSvc.Log(ctx, &user.ID, "transfer", "skill", &skill.ID,
+			fmt.Sprintf("from=%s,to=%s", skill.NamespaceSlug, targetNSSlug), "")
+	}
+	return nil
+}
 
 // UpdateFileRequest describes a single-file update that auto-bumps the patch version.
 type UpdateFileRequest struct {

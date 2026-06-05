@@ -26,17 +26,20 @@ func (h *NamespaceHandler) Create(c *gin.Context) {
 	}
 
 	var req struct {
-		Slug        string `json:"slug" binding:"required"`
-		DisplayName string `json:"displayName"`
-		Description string `json:"description"`
-		Type        string `json:"type"`
+		Slug              string `json:"slug" binding:"required"`
+		DisplayName       string `json:"displayName"`
+		Description       string `json:"description"`
+		Type              string `json:"type"`
+		DefaultVisibility string `json:"defaultVisibility"`
+		MaxSkills         int    `json:"maxSkills"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "slug is required"})
 		return
 	}
 
-	ns, err := h.svc.Create(c.Request.Context(), user, req.Slug, req.DisplayName, req.Description, req.Type)
+	ns, err := h.svc.Create(c.Request.Context(), user, req.Slug, req.DisplayName, req.Description, req.Type,
+		service.NamespaceOptions{DefaultVisibility: req.DefaultVisibility, MaxSkills: req.MaxSkills})
 	if err != nil {
 		writeServiceError(c, err)
 		return
@@ -95,15 +98,18 @@ func (h *NamespaceHandler) Update(c *gin.Context) {
 
 	slug := c.Param("slug")
 	var req struct {
-		DisplayName string `json:"displayName"`
-		Description string `json:"description"`
+		DisplayName       string `json:"displayName"`
+		Description       string `json:"description"`
+		DefaultVisibility string `json:"defaultVisibility"`
+		MaxSkills         int    `json:"maxSkills"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
-	ns, err := h.svc.Update(c.Request.Context(), user, slug, req.DisplayName, req.Description)
+	ns, err := h.svc.Update(c.Request.Context(), user, slug, req.DisplayName, req.Description,
+		service.NamespaceOptions{DefaultVisibility: req.DefaultVisibility, MaxSkills: req.MaxSkills})
 	if err != nil {
 		writeServiceError(c, err)
 		return

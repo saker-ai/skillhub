@@ -115,10 +115,11 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		public.GET("/search", s.h.search.Search)
 		public.GET("/categories", s.h.skill.Categories)
 		public.GET("/skills", s.h.skill.List)
-		public.GET("/skills/:slug", s.h.skill.Get)
-		public.GET("/skills/:slug/versions", s.h.skill.Versions)
-		public.GET("/skills/:slug/versions/:version", s.h.skill.Version)
-		public.GET("/skills/:slug/file", s.h.skill.GetFile)
+		deprecate := middleware.DeprecateRoute("2026-12-31")
+		public.GET("/skills/:slug", deprecate, s.h.skill.Get)
+		public.GET("/skills/:slug/versions", deprecate, s.h.skill.Versions)
+		public.GET("/skills/:slug/versions/:version", deprecate, s.h.skill.Version)
+		public.GET("/skills/:slug/file", deprecate, s.h.skill.GetFile)
 		public.GET("/resolve", s.h.download.Resolve)
 		public.GET("/skills/:slug/ratings", s.h.rating.List)
 		public.GET("/skills/:slug/comments", s.h.comment.List)
@@ -140,6 +141,10 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		public.GET("/plugins/:slug/versions", s.h.plugin.Versions)
 		public.GET("/plugins/file", s.h.plugin.GetFile)
 		public.GET("/plugins/download", s.h.plugin.Download)
+
+		// Namespace-qualified plugin routes (public read)
+		public.GET("/plugins/@:namespace/:slug", s.h.plugin.Get)
+		public.GET("/plugins/@:namespace/:slug/versions", s.h.plugin.Versions)
 	}
 
 	// Download endpoint (with download rate limit)
@@ -163,6 +168,7 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		authed.POST("/skills/:slug/undelete", s.h.skill.Undelete)
 		authed.POST("/skills/:slug/request-public", s.h.skill.RequestPublic)
 		authed.PUT("/skills/:slug/file", s.h.skill.UpdateFile)
+		authed.POST("/skills/:slug/transfer", s.h.skill.TransferSkill)
 		authed.POST("/skills/:slug/versions/:version/yank", s.h.skill.YankVersion)
 		authed.DELETE("/skills/:slug/versions/:version/yank", s.h.skill.UnyankVersion)
 		authed.POST("/skills/:slug/versions/:version/deprecate", s.h.skill.DeprecateVersion)
@@ -206,6 +212,7 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		authed.POST("/skills/@:namespace/:slug/undelete", s.h.skill.Undelete)
 		authed.POST("/skills/@:namespace/:slug/request-public", s.h.skill.RequestPublic)
 		authed.PUT("/skills/@:namespace/:slug/file", s.h.skill.UpdateFile)
+		authed.POST("/skills/@:namespace/:slug/transfer", s.h.skill.TransferSkill)
 		authed.POST("/skills/@:namespace/:slug/versions/:version/yank", s.h.skill.YankVersion)
 		authed.DELETE("/skills/@:namespace/:slug/versions/:version/yank", s.h.skill.UnyankVersion)
 		authed.POST("/skills/@:namespace/:slug/versions/:version/deprecate", s.h.skill.DeprecateVersion)
@@ -214,6 +221,7 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		authed.DELETE("/stars/@:namespace/:slug", s.h.star.Unstar)
 		authed.POST("/skills/@:namespace/:slug/ratings", s.h.rating.Rate)
 		authed.DELETE("/skills/@:namespace/:slug/ratings", s.h.rating.Delete)
+		authed.POST("/skills/@:namespace/:slug/comments", s.h.comment.Create)
 
 		// Plugin publish (authenticated)
 		authed.POST("/plugins", s.h.plugin.Publish)
@@ -221,6 +229,12 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		authed.POST("/plugins/:slug/undelete", s.h.plugin.Undelete)
 		authed.POST("/plugins/:slug/versions/:version/yank", s.h.plugin.YankVersion)
 		authed.DELETE("/plugins/:slug/versions/:version/yank", s.h.plugin.UnyankVersion)
+
+		// Namespace-qualified plugin routes (authenticated write)
+		authed.DELETE("/plugins/@:namespace/:slug", s.h.plugin.Delete)
+		authed.POST("/plugins/@:namespace/:slug/undelete", s.h.plugin.Undelete)
+		authed.POST("/plugins/@:namespace/:slug/versions/:version/yank", s.h.plugin.YankVersion)
+		authed.DELETE("/plugins/@:namespace/:slug/versions/:version/yank", s.h.plugin.UnyankVersion)
 	}
 
 	// Admin endpoints

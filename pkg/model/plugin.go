@@ -34,6 +34,7 @@ type PluginWithOwner struct {
 	Plugin
 	OwnerHandle    string  `gorm:"column:owner_handle" json:"ownerHandle"`
 	OwnerAvatarURL *string `gorm:"column:owner_avatar_url" json:"ownerAvatarUrl,omitempty"`
+	NamespaceSlug  string  `gorm:"column:namespace_slug" json:"namespaceSlug"`
 }
 
 // PluginVersion represents a specific version of a plugin.

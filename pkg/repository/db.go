@@ -143,6 +143,13 @@ func NewDBWithOptions(cfg config.DatabaseConfig, opts DBOptions) (*gorm.DB, erro
 	}
 	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_ns_slug ON skills (namespace_id, slug)")
 
+	// Plugin namespace migration (same pattern as skills).
+	migratePluginNamespaces(db)
+	for _, idx := range []string{"idx_plugins_slug", "uni_plugins_slug"} {
+		db.Exec("DROP INDEX IF EXISTS " + idx)
+	}
+	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_ns_slug ON plugins (namespace_id, slug)")
+
 	// Backfill alias namespace_id from the skill they point to.
 	db.Exec(`UPDATE skill_slug_aliases SET namespace_id = (
 		SELECT namespace_id FROM skills WHERE skills.id = skill_slug_aliases.skill_id
@@ -246,6 +253,58 @@ func migrateSkillNamespaces(db *gorm.DB) {
 	if totalMigrated > 0 {
 		slog.Default().Info("namespace migration: assigned orphaned skills to personal namespaces",
 			"skills", totalMigrated, "owners", len(owners))
+	}
+}
+
+// migratePluginNamespaces assigns all plugins with namespace_id IS NULL to their
+// owner's personal namespace. Same pattern as migrateSkillNamespaces.
+func migratePluginNamespaces(db *gorm.DB) {
+	type ownerRow struct {
+		OwnerID string
+		Handle  string
+	}
+	var owners []ownerRow
+	db.Raw(`SELECT DISTINCT p.owner_id, u.handle
+		FROM plugins p JOIN users u ON p.owner_id = u.id
+		WHERE p.namespace_id IS NULL`).Scan(&owners)
+
+	if len(owners) == 0 {
+		return
+	}
+
+	var totalMigrated int64
+	for _, o := range owners {
+		var ns model.Namespace
+		err := db.Where("owner_id = ? AND type = 'personal'", o.OwnerID).First(&ns).Error
+		if err != nil {
+			ns = model.Namespace{
+				ID:      uuid.New(),
+				Slug:    o.Handle,
+				OwnerID: uuid.MustParse(o.OwnerID),
+				Type:    "personal",
+				Status:  "active",
+			}
+			if err := db.Create(&ns).Error; err != nil {
+				continue
+			}
+			member := model.NamespaceMember{
+				ID:          uuid.New(),
+				NamespaceID: ns.ID,
+				UserID:      uuid.MustParse(o.OwnerID),
+				Role:        "owner",
+			}
+			db.Create(&member)
+		}
+
+		result := db.Model(&model.Plugin{}).
+			Where("namespace_id IS NULL AND owner_id = ?", o.OwnerID).
+			Update("namespace_id", ns.ID)
+		totalMigrated += result.RowsAffected
+	}
+
+	if totalMigrated > 0 {
+		slog.Default().Info("namespace migration: assigned orphaned plugins to personal namespaces",
+			"plugins", totalMigrated, "owners", len(owners))
 	}
 }
 

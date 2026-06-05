@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -44,18 +45,50 @@ func (r *PluginRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Plugin, 
 	return &p, nil
 }
 
+const pluginWithOwnerSelect = "plugins.*, users.handle as owner_handle, users.avatar_url as owner_avatar_url, namespaces.slug as namespace_slug"
+
 func (r *PluginRepo) GetWithOwner(ctx context.Context, slug string) (*model.PluginWithOwner, error) {
 	var p model.PluginWithOwner
 	err := r.db.WithContext(ctx).
 		Table("plugins").
-		Select("plugins.*, users.handle as owner_handle, users.avatar_url as owner_avatar_url").
+		Select(pluginWithOwnerSelect).
 		Joins("LEFT JOIN users ON users.id = plugins.owner_id").
+		Joins("LEFT JOIN namespaces ON namespaces.id = plugins.namespace_id").
 		Where("plugins.slug = ? AND plugins.soft_deleted_at IS NULL", slug).
 		First(&p).Error
 	if err != nil {
 		return nil, err
 	}
 	return &p, nil
+}
+
+// GetByNSAndSlug looks up a plugin by namespace ID and slug.
+func (r *PluginRepo) GetByNSAndSlug(ctx context.Context, namespaceID uuid.UUID, slug string) (*model.PluginWithOwner, error) {
+	var p model.PluginWithOwner
+	err := r.db.WithContext(ctx).
+		Table("plugins").
+		Select(pluginWithOwnerSelect).
+		Joins("LEFT JOIN users ON users.id = plugins.owner_id").
+		Joins("LEFT JOIN namespaces ON namespaces.id = plugins.namespace_id").
+		Where("plugins.namespace_id = ? AND plugins.slug = ? AND plugins.soft_deleted_at IS NULL", namespaceID, slug).
+		First(&p).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &p, err
+}
+
+// GetBySlugGlobal returns all non-deleted plugins matching a slug across namespaces.
+func (r *PluginRepo) GetBySlugGlobal(ctx context.Context, slug string) ([]model.PluginWithOwner, error) {
+	var plugins []model.PluginWithOwner
+	err := r.db.WithContext(ctx).
+		Table("plugins").
+		Select(pluginWithOwnerSelect).
+		Joins("LEFT JOIN users ON users.id = plugins.owner_id").
+		Joins("LEFT JOIN namespaces ON namespaces.id = plugins.namespace_id").
+		Where("plugins.slug = ? AND plugins.soft_deleted_at IS NULL", slug).
+		Find(&plugins).Error
+	return plugins, err
 }
 
 type PluginListOptions struct {

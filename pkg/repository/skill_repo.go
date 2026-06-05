@@ -380,6 +380,16 @@ func (r *SkillRepo) Undelete(ctx context.Context, skillID uuid.UUID) error {
 		}).Error
 }
 
+// CountByNamespace returns the number of non-deleted skills in a namespace.
+func (r *SkillRepo) CountByNamespace(ctx context.Context, namespaceID uuid.UUID) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&model.Skill{}).
+		Where("namespace_id = ? AND soft_deleted_at IS NULL", namespaceID).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *SkillRepo) IsSlugReserved(ctx context.Context, slug string) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.ReservedSlug{}).Where("slug = ?", slug).Count(&count).Error

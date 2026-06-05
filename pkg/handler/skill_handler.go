@@ -373,6 +373,28 @@ func (h *SkillHandler) RequestPublic(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "public review requested"})
 }
 
+// TransferSkill handles POST /api/v1/skills/:slug/transfer
+func (h *SkillHandler) TransferSkill(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	ref := extractSkillRef(c)
+	var req struct {
+		Namespace string `json:"namespace" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "namespace is required"})
+		return
+	}
+	if err := h.svc.TransferSkill(c.Request.Context(), user, ref, req.Namespace, middleware.GetTokenNamespace(c)); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "skill transferred"})
+}
+
 // UpdateFile handles PUT /api/v1/skills/:slug/file and PUT /api/v1/skills/@:namespace/:slug/file
 func (h *SkillHandler) UpdateFile(c *gin.Context) {
 	user := middleware.GetUser(c)

@@ -133,6 +133,23 @@ paths:
               schema: { type: object, additionalProperties: true }
         "400": { $ref: "#/components/responses/BadRequest" }
 
+  /api/v1/categories:
+    get:
+      tags: [Skills]
+      summary: List valid skill categories
+      responses:
+        "200":
+          description: Category list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items: { type: string }
+                    example: [devops, security, data, frontend, backend, infra, testing, ai, general]
+
   /api/v1/skills:
     get:
       tags: [Skills]

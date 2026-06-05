@@ -39,6 +39,10 @@ func (h *PluginHandler) Publish(c *gin.Context) {
 		return
 	}
 	input.OwnerID = user.ID
+	input.User = user
+	if ns := c.PostForm("namespace"); ns != "" {
+		input.NamespaceSlug = ns
+	}
 
 	result, err := h.svc.Publish(c.Request.Context(), *input)
 	if err != nil {

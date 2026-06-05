@@ -180,6 +180,16 @@ func (r *NamespaceRepo) EnsurePersonalNamespace(ctx context.Context, user *model
 	return ns, nil
 }
 
+// ListMemberIDs returns all member user IDs for a namespace.
+func (r *NamespaceRepo) ListMemberIDs(ctx context.Context, namespaceID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.WithContext(ctx).
+		Model(&model.NamespaceMember{}).
+		Where("namespace_id = ?", namespaceID).
+		Pluck("user_id", &ids).Error
+	return ids, err
+}
+
 // Delete removes a namespace.
 func (r *NamespaceRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

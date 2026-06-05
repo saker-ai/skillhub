@@ -12,8 +12,10 @@ type Namespace struct {
 	DisplayName *string   `gorm:"column:display_name;type:varchar(256)" json:"displayName,omitempty"`
 	Description *string   `gorm:"column:description;type:text" json:"description,omitempty"`
 	OwnerID     uuid.UUID `gorm:"column:owner_id;type:text;not null;index" json:"ownerId"`
-	Type        string    `gorm:"column:type;type:varchar(20);not null;default:'team'" json:"type"`       // personal | team
-	Status      string    `gorm:"column:status;type:varchar(20);not null;default:'active'" json:"status"` // active | suspended
+	Type              string `gorm:"column:type;type:varchar(20);not null;default:'team'" json:"type"`                        // personal | team
+	Status            string `gorm:"column:status;type:varchar(20);not null;default:'active'" json:"status"`                  // active | suspended
+	DefaultVisibility string `gorm:"column:default_visibility;type:varchar(20);not null;default:'private'" json:"defaultVisibility"` // private | public
+	MaxSkills         int    `gorm:"column:max_skills;not null;default:0" json:"maxSkills"`                                   // 0 = unlimited
 	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"createdAt"`
 	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updatedAt"`
 }

@@ -76,8 +76,62 @@ func (s *NamespaceService) EnsurePersonalNamespace(ctx context.Context, user *mo
 	return s.nsRepo.EnsurePersonalNamespace(ctx, user)
 }
 
+// EnsureOrgNamespace finds or creates a team namespace for an organization slug,
+// and ensures the given user is at least a member. Used by OAuth org sync.
+func (s *NamespaceService) EnsureOrgNamespace(ctx context.Context, orgSlug string, userID uuid.UUID) (*model.Namespace, error) {
+	ns, err := s.nsRepo.GetBySlug(ctx, orgSlug)
+	if err != nil {
+		return nil, err
+	}
+	if ns == nil {
+		ns = &model.Namespace{
+			ID:                uuid.New(),
+			Slug:              orgSlug,
+			OwnerID:           userID,
+			Type:              "team",
+			Status:            "active",
+			DefaultVisibility: "private",
+		}
+		if err := s.nsRepo.Create(ctx, ns); err != nil {
+			// Race: another request created it — fetch.
+			ns, _ = s.nsRepo.GetBySlug(ctx, orgSlug)
+			if ns == nil {
+				return nil, err
+			}
+		} else {
+			member := &model.NamespaceMember{
+				ID:          uuid.New(),
+				NamespaceID: ns.ID,
+				UserID:      userID,
+				Role:        "owner",
+			}
+			_ = s.nsRepo.AddMember(ctx, member)
+			return ns, nil
+		}
+	}
+
+	// Ensure user is a member.
+	role, _ := s.nsRepo.GetMemberRole(ctx, ns.ID, userID)
+	if role == "" {
+		member := &model.NamespaceMember{
+			ID:          uuid.New(),
+			NamespaceID: ns.ID,
+			UserID:      userID,
+			Role:        "member",
+		}
+		_ = s.nsRepo.AddMember(ctx, member)
+	}
+	return ns, nil
+}
+
 // Create creates a new namespace and adds the creator as owner.
-func (s *NamespaceService) Create(ctx context.Context, user *model.User, slug, displayName, description, nsType string) (*model.Namespace, error) {
+// NamespaceOptions holds optional fields for Create/Update.
+type NamespaceOptions struct {
+	DefaultVisibility string
+	MaxSkills         int
+}
+
+func (s *NamespaceService) Create(ctx context.Context, user *model.User, slug, displayName, description, nsType string, opts ...NamespaceOptions) (*model.Namespace, error) {
 	if !nsSlugRe.MatchString(slug) {
 		return nil, fmt.Errorf("invalid namespace slug: must be 3-64 lowercase alphanumeric characters or hyphens")
 	}
@@ -98,17 +152,26 @@ func (s *NamespaceService) Create(ctx context.Context, user *model.User, slug, d
 	}
 
 	ns := &model.Namespace{
-		ID:      uuid.New(),
-		Slug:    slug,
-		OwnerID: user.ID,
-		Type:    nsType,
-		Status:  "active",
+		ID:                uuid.New(),
+		Slug:              slug,
+		OwnerID:           user.ID,
+		Type:              nsType,
+		Status:            "active",
+		DefaultVisibility: "private",
 	}
 	if displayName != "" {
 		ns.DisplayName = &displayName
 	}
 	if description != "" {
 		ns.Description = &description
+	}
+	if len(opts) > 0 {
+		if opts[0].DefaultVisibility == "public" || opts[0].DefaultVisibility == "private" {
+			ns.DefaultVisibility = opts[0].DefaultVisibility
+		}
+		if opts[0].MaxSkills > 0 {
+			ns.MaxSkills = opts[0].MaxSkills
+		}
 	}
 
 	if err := s.nsRepo.Create(ctx, ns); err != nil {
@@ -140,7 +203,7 @@ func (s *NamespaceService) ListByUser(ctx context.Context, userID uuid.UUID) ([]
 }
 
 // Update updates a namespace's display name and description.
-func (s *NamespaceService) Update(ctx context.Context, user *model.User, slug, displayName, description string) (*model.Namespace, error) {
+func (s *NamespaceService) Update(ctx context.Context, user *model.User, slug, displayName, description string, opts ...NamespaceOptions) (*model.Namespace, error) {
 	ns, err := s.nsRepo.GetBySlug(ctx, slug)
 	if err != nil || ns == nil {
 		return nil, fmt.Errorf("namespace not found")
@@ -156,6 +219,14 @@ func (s *NamespaceService) Update(ctx context.Context, user *model.User, slug, d
 
 	ns.DisplayName = &displayName
 	ns.Description = &description
+	if len(opts) > 0 {
+		if opts[0].DefaultVisibility == "public" || opts[0].DefaultVisibility == "private" {
+			ns.DefaultVisibility = opts[0].DefaultVisibility
+		}
+		if opts[0].MaxSkills >= 0 {
+			ns.MaxSkills = opts[0].MaxSkills
+		}
+	}
 
 	if err := s.nsRepo.Update(ctx, ns); err != nil {
 		return nil, err
@@ -181,8 +252,8 @@ func (s *NamespaceService) AddMember(ctx context.Context, actor *model.User, nsS
 	if role == "" {
 		role = "member"
 	}
-	if role != "owner" && role != "admin" && role != "member" {
-		return fmt.Errorf("role must be 'owner', 'admin', or 'member'")
+	if role != "owner" && role != "admin" && role != "member" && role != "reader" {
+		return fmt.Errorf("role must be 'owner', 'admin', 'member', or 'reader'")
 	}
 
 	targetUser, err := s.userRepo.GetByHandle(ctx, handle)
@@ -273,6 +344,11 @@ func (s *NamespaceService) ListMembers(ctx context.Context, nsSlug string) ([]mo
 	return s.nsRepo.ListMembers(ctx, ns.ID)
 }
 
+// ListMemberIDs returns all member user IDs for a namespace.
+func (s *NamespaceService) ListMemberIDs(ctx context.Context, nsID uuid.UUID) ([]uuid.UUID, error) {
+	return s.nsRepo.ListMemberIDs(ctx, nsID)
+}
+
 // IsMemberOrAdmin checks if a user is a member of the namespace or a system admin.
 func (s *NamespaceService) IsMemberOrAdmin(ctx context.Context, nsID uuid.UUID, user *model.User) bool {
 	if user.IsAdmin() {
@@ -286,6 +362,7 @@ func (s *NamespaceService) IsMemberOrAdmin(ctx context.Context, nsID uuid.UUID, 
 }
 
 // CanPublish checks if a user can publish to a namespace.
+// Readers cannot publish — only owner, admin, and member roles can.
 func (s *NamespaceService) CanPublish(ctx context.Context, nsSlug string, userID uuid.UUID) (bool, error) {
 	ns, err := s.nsRepo.GetBySlug(ctx, nsSlug)
 	if err != nil || ns == nil {
@@ -295,8 +372,7 @@ func (s *NamespaceService) CanPublish(ctx context.Context, nsSlug string, userID
 	if err != nil {
 		return false, err
 	}
-	// Any member can publish
-	return role != "", nil
+	return role != "" && role != "reader", nil
 }
 
 // CanManageTokens 判定 user 是否可在该 namespace 下创建/吊销/列出团队 token。
@@ -467,8 +543,8 @@ func (s *NamespaceService) Invite(ctx context.Context, actor *model.User, nsSlug
 	if role == "" {
 		role = "member"
 	}
-	if role != "admin" && role != "member" {
-		return nil, fmt.Errorf("invited role must be 'admin' or 'member'")
+	if role != "admin" && role != "member" && role != "reader" {
+		return nil, fmt.Errorf("invited role must be 'admin', 'member', or 'reader'")
 	}
 
 	invitee, err := s.userRepo.GetByHandle(ctx, inviteeHandle)

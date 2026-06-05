@@ -218,6 +218,19 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 	// Device Auth
 	deviceSvc := auth.NewDeviceAuthService(authSvc, cfg.Server.BaseURL)
 
+	// OAuth org sync — enabled per-provider via config. We wire the hook
+	// later after nsSvc is created, but set the flag now.
+	oauthSyncOrgs := false
+	for _, pcfg := range cfg.Auth.OAuth {
+		if pcfg.SyncOrgs {
+			oauthSyncOrgs = true
+			break
+		}
+	}
+	if oauthSyncOrgs {
+		oauthSvc.SetSyncOrgs(true)
+	}
+
 	// Audit
 	auditRepo := repository.NewAuditRepo(db)
 	auditSvc := service.NewAuditService(auditRepo)
@@ -245,10 +258,22 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 	nsSvc.SetMetrics(mx)
 	skillSvc.SetNamespaceService(nsSvc)
 
+	// Wire OAuth org sync hook now that nsSvc is available.
+	if oauthSyncOrgs {
+		oauthSvc.SetPostLoginHook(func(ctx context.Context, user *model.User, orgs []string) {
+			for _, org := range orgs {
+				if _, err := nsSvc.EnsureOrgNamespace(ctx, org, user.ID); err != nil {
+					lg.Warn("oauth org sync failed", "org", org, "user", user.Handle, "err", err)
+				}
+			}
+		})
+	}
+
 	// Notifications
 	notifRepo := repository.NewNotificationRepo(db)
 	notifSvc := service.NewNotificationService(notifRepo)
 	notifSvc.SetLogger(lg)
+	skillSvc.SetNotificationService(notifSvc)
 
 	// Ratings
 	ratingRepo := repository.NewRatingRepo(db)
@@ -265,6 +290,7 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 
 	// Plugin service
 	pluginSvc := service.NewPluginService(db, repository.NewPluginRepo(db), fileStore, searchClient, auditSvc, lg)
+	pluginSvc.SetNamespaceService(nsSvc)
 
 	// Handlers — populated into Server.h, consumed by RegisterRoutes.
 	searchHandler := handler.NewSearchHandler(searchClient)

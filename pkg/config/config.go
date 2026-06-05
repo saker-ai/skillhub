@@ -120,7 +120,8 @@ type CacheConfig struct {
 type OAuthProviderConfig struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
-	BaseURL      string `yaml:"base_url"` // for self-hosted GitLab etc.
+	BaseURL      string `yaml:"base_url"`   // for self-hosted GitLab etc.
+	SyncOrgs     bool   `yaml:"sync_orgs"`  // auto-create namespace per org membership
 }
 
 func DefaultConfig() *Config {

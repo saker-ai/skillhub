@@ -39,8 +39,10 @@ type OAuthService struct {
 	userRepo   *repository.UserRepo
 	authSvc    *Service
 	baseURL    string
-	stateStore sync.Map // state -> expiresAt (server-side CSRF store)
-	done       chan struct{}
+	stateStore    sync.Map // state -> expiresAt (server-side CSRF store)
+	done          chan struct{}
+	postLoginHook PostLoginFunc
+	syncOrgs      bool
 }
 
 // NewOAuthService creates a new OAuthService from config.
@@ -67,6 +69,16 @@ func NewOAuthService(cfg map[string]config.OAuthProviderConfig, oauthRepo *repos
 	}
 	go svc.cleanupStates()
 	return svc
+}
+
+// SetPostLoginHook registers a callback invoked after each successful OAuth login.
+func (s *OAuthService) SetPostLoginHook(fn PostLoginFunc) {
+	s.postLoginHook = fn
+}
+
+// SetSyncOrgs enables fetching organization memberships during OAuth login.
+func (s *OAuthService) SetSyncOrgs(enabled bool) {
+	s.syncOrgs = enabled
 }
 
 // Close stops the cleanup goroutine.
@@ -174,12 +186,16 @@ func (s *OAuthService) IsSecure() bool {
 	return strings.HasPrefix(s.baseURL, "https://")
 }
 
+// PostLoginFunc is called after a successful OAuth login with the user and their org list.
+type PostLoginFunc func(ctx context.Context, user *model.User, orgs []string)
+
 // OAuthUserInfo represents the user info from an OAuth provider.
 type OAuthUserInfo struct {
-	ID        string
-	Login     string
-	Email     string
-	AvatarURL string
+	ID            string
+	Login         string
+	Email         string
+	AvatarURL     string
+	Organizations []string
 }
 
 // HandleCallback exchanges the code for a token, fetches user info, and returns or creates a user.
@@ -203,10 +219,21 @@ func (s *OAuthService) HandleCallback(ctx context.Context, providerName, code st
 		return "", nil, fmt.Errorf("fetch user info: %w", err)
 	}
 
+	// Fetch org memberships if enabled.
+	if s.syncOrgs {
+		orgs, _ := fetchOrganizations(p, accessToken)
+		info.Organizations = orgs
+	}
+
 	// Find or create user
 	user, err := s.findOrCreateUser(ctx, providerName, info)
 	if err != nil {
 		return "", nil, err
+	}
+
+	// Post-login hook: sync org → namespace mappings.
+	if s.postLoginHook != nil && len(info.Organizations) > 0 {
+		s.postLoginHook(ctx, user, info.Organizations)
 	}
 
 	// Create session token (30-day expiry)
@@ -405,6 +432,63 @@ func fetchUserInfo(p *OAuthProvider, accessToken string) (*OAuthUserInfo, error)
 	}
 
 	return info, nil
+}
+
+// fetchOrganizations retrieves the user's organization memberships from the OAuth provider.
+// GitHub: GET /user/orgs; GitLab: GET /api/v4/groups (member only).
+func fetchOrganizations(p *OAuthProvider, accessToken string) ([]string, error) {
+	var apiURL string
+	switch p.Name {
+	case "github":
+		apiURL = "https://api.github.com/user/orgs?per_page=100"
+	case "gitlab":
+		base := strings.TrimSuffix(p.UserInfoURL, "/api/v4/user")
+		apiURL = base + "/api/v4/groups?min_access_level=10&per_page=100"
+	default:
+		return nil, nil
+	}
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := oauthHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil
+	}
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var items []map[string]interface{}
+	if err := json.Unmarshal(body, &items); err != nil {
+		return nil, nil
+	}
+
+	var orgs []string
+	for _, item := range items {
+		var name string
+		switch p.Name {
+		case "github":
+			if v, ok := item["login"].(string); ok {
+				name = v
+			}
+		case "gitlab":
+			if v, ok := item["path"].(string); ok {
+				name = v
+			}
+		}
+		if name != "" {
+			orgs = append(orgs, strings.ToLower(name))
+		}
+	}
+	return orgs, nil
 }
 
 func randomState() (string, error) {

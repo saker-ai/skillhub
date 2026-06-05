@@ -130,6 +130,7 @@ type PluginDocument struct {
 	Tags             []string `json:"tags"`
 	OwnerHandle      string   `json:"ownerHandle"`
 	OwnerHandleExact string   `json:"ownerHandleExact"`
+	NamespaceSlug    string   `json:"namespaceSlug"`
 	Visibility       string   `json:"visibility"`
 	ModerationStatus string   `json:"moderationStatus"`
 	IsDeleted        bool     `json:"isDeleted"`
