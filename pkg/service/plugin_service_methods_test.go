@@ -22,6 +22,7 @@ type pluginFixtures struct {
 	db         *gorm.DB
 	svc        *PluginService
 	pluginRepo *repository.PluginRepo
+	nsSvc      *NamespaceService
 	owner      *model.User
 	other      *model.User
 	admin      *model.User
@@ -49,6 +50,7 @@ func setupPluginFixtures(t *testing.T) *pluginFixtures {
 	userRepo := repository.NewUserRepo(db)
 	pluginRepo := repository.NewPluginRepo(db)
 	auditRepo := repository.NewAuditRepo(db)
+	nsRepo := repository.NewNamespaceRepo(db)
 
 	if err := pluginRepo.Migrate(ctx); err != nil {
 		t.Fatalf("plugin migrate: %v", err)
@@ -69,13 +71,16 @@ func setupPluginFixtures(t *testing.T) *pluginFixtures {
 	}
 	fileStore := storegit.New(gs)
 	auditSvc := NewAuditService(auditRepo)
+	nsSvc := NewNamespaceService(nsRepo, userRepo)
 
 	svc := NewPluginService(db, pluginRepo, fileStore, nil, auditSvc, slog.Default())
+	svc.SetNamespaceService(nsSvc)
 
 	return &pluginFixtures{
 		db:         db,
 		svc:        svc,
 		pluginRepo: pluginRepo,
+		nsSvc:      nsSvc,
 		owner:      owner,
 		other:      other,
 		admin:      admin,
@@ -249,7 +254,7 @@ func TestPluginService_Publish(t *testing.T) {
 					Slug:    "with-skills",
 					Version: "1.0.0",
 					Files: map[string][]byte{
-						"plugin.json":         []byte(`{"name":"with-skills","version":"1.0.0","skills":{"entries":["greet"]}}`),
+						"plugin.json":           []byte(`{"name":"with-skills","version":"1.0.0","skills":{"entries":["greet"]}}`),
 						"skills/greet/SKILL.md": []byte("# greet"),
 					},
 					OwnerID: fx.owner.ID,
@@ -612,6 +617,85 @@ func TestPluginService_GetFile(t *testing.T) {
 			t.Fatalf("GetFile not found: want ErrNotFound, got %v", err)
 		}
 	})
+}
+
+func TestPluginService_NamespaceQualifiedRefsAreIsolated(t *testing.T) {
+	t.Parallel()
+	fx := setupPluginFixtures(t)
+	ctx := context.Background()
+
+	if _, err := fx.nsSvc.Create(ctx, fx.owner, "team-a", "", "", "team"); err != nil {
+		t.Fatalf("create team-a: %v", err)
+	}
+	if _, err := fx.nsSvc.Create(ctx, fx.owner, "team-b", "", "", "team"); err != nil {
+		t.Fatalf("create team-b: %v", err)
+	}
+
+	publish := func(ns, body string) {
+		t.Helper()
+		_, err := fx.svc.Publish(ctx, PluginPublishInput{
+			Slug:          "shared",
+			Version:       "1.0.0",
+			NamespaceSlug: ns,
+			User:          fx.owner,
+			OwnerID:       fx.owner.ID,
+			Files: map[string][]byte{
+				"plugin.json": validPluginJSON("shared"),
+				"README.md":   []byte(body),
+			},
+		})
+		if err != nil {
+			t.Fatalf("publish %s/shared: %v", ns, err)
+		}
+	}
+	publish("team-a", "from team a")
+	publish("team-b", "from team b")
+
+	if _, err := fx.svc.Get(ctx, "shared"); err == nil {
+		t.Fatalf("bare shared lookup should be ambiguous")
+	}
+
+	a, err := fx.svc.GetFile(ctx, "@team-a/shared", "1.0.0", "README.md")
+	if err != nil {
+		t.Fatalf("get team-a file: %v", err)
+	}
+	if string(a) != "from team a" {
+		t.Fatalf("team-a file = %q", a)
+	}
+	b, err := fx.svc.GetFile(ctx, "@team-b/shared", "1.0.0", "README.md")
+	if err != nil {
+		t.Fatalf("get team-b file: %v", err)
+	}
+	if string(b) != "from team b" {
+		t.Fatalf("team-b file = %q", b)
+	}
+
+	if err := fx.svc.SoftDelete(ctx, fx.owner, "@team-a/shared"); err != nil {
+		t.Fatalf("delete team-a: %v", err)
+	}
+	if err := fx.svc.Undelete(ctx, fx.owner, "@team-a/shared"); err != nil {
+		t.Fatalf("undelete team-a: %v", err)
+	}
+}
+
+func TestPluginService_PublishNamespaceRequiresMembership(t *testing.T) {
+	t.Parallel()
+	fx := setupPluginFixtures(t)
+	ctx := context.Background()
+	if _, err := fx.nsSvc.Create(ctx, fx.owner, "locked", "", "", "team"); err != nil {
+		t.Fatalf("create locked: %v", err)
+	}
+	_, err := fx.svc.Publish(ctx, PluginPublishInput{
+		Slug:          "blocked",
+		Version:       "1.0.0",
+		NamespaceSlug: "locked",
+		User:          fx.other,
+		OwnerID:       fx.other.ID,
+		Files:         validPluginFiles("blocked"),
+	})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("publish as non-member: want ErrForbidden, got %v", err)
+	}
 }
 
 func TestPluginService_Get(t *testing.T) {

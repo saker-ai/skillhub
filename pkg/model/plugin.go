@@ -9,7 +9,7 @@ import (
 // Plugin represents a plugin package — a bundle of skills, MCP servers, and hooks.
 type Plugin struct {
 	ID               uuid.UUID   `gorm:"column:id;type:text;primaryKey" json:"id"`
-	Slug             string      `gorm:"column:slug;type:varchar(128);uniqueIndex;not null" json:"slug"`
+	Slug             string      `gorm:"column:slug;type:varchar(128);not null" json:"slug"`
 	DisplayName      *string     `gorm:"column:display_name;type:varchar(256)" json:"displayName,omitempty"`
 	Summary          *string     `gorm:"column:summary;type:text" json:"summary,omitempty"`
 	OwnerID          uuid.UUID   `gorm:"column:owner_id;type:text;not null;index" json:"ownerId"`

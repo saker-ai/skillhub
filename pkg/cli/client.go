@@ -104,6 +104,23 @@ func skillPath(ref string) string {
 	return "/api/v1/skills/" + url.PathEscape(ref)
 }
 
+func splitNamespaceRef(ref string) (namespace, slug string) {
+	if strings.HasPrefix(ref, "@") {
+		if idx := strings.IndexByte(ref[1:], '/'); idx > 0 {
+			return ref[1 : idx+1], ref[idx+2:]
+		}
+	}
+	return "", ref
+}
+
+func pluginPath(ref string) string {
+	ns, slug := splitNamespaceRef(ref)
+	if ns != "" {
+		return "/api/v1/plugins/@" + url.PathEscape(ns) + "/" + url.PathEscape(slug)
+	}
+	return "/api/v1/plugins/" + url.PathEscape(slug)
+}
+
 // ListSkills calls GET /api/v1/skills
 func (c *Client) ListSkills(sort string, limit int) (map[string]interface{}, error) {
 	path := fmt.Sprintf("/api/v1/skills?sort=%s&limit=%d", url.QueryEscape(sort), limit)
@@ -205,6 +222,147 @@ func (c *Client) Publish(slug, version, summary, tags, changelog, category strin
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 	return result, nil
+}
+
+// ListPlugins calls GET /api/v1/plugins.
+func (c *Client) ListPlugins(sort string, limit int) (map[string]interface{}, error) {
+	path := fmt.Sprintf("/api/v1/plugins?sort=%s&limit=%d", url.QueryEscape(sort), limit)
+	var result map[string]interface{}
+	err := c.getJSON(path, &result)
+	return result, err
+}
+
+// GetPlugin calls GET /api/v1/plugins/:slug or /api/v1/plugins/@:namespace/:slug.
+func (c *Client) GetPlugin(ref string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.getJSON(pluginPath(ref), &result)
+	return result, err
+}
+
+// GetPluginVersions calls GET /api/v1/plugins/:slug/versions.
+func (c *Client) GetPluginVersions(ref string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.getJSON(pluginPath(ref)+"/versions", &result)
+	return result, err
+}
+
+// GetPluginFile calls GET /api/v1/plugins/file.
+func (c *Client) GetPluginFile(ref, version, filePath string) ([]byte, error) {
+	ns, slug := splitNamespaceRef(ref)
+	params := url.Values{
+		"slug":    {slug},
+		"version": {version},
+		"path":    {filePath},
+	}
+	if ns != "" {
+		params.Set("namespace", ns)
+	}
+	resp, err := c.do("GET", "/api/v1/plugins/file?"+params.Encode(), nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, parseAPIError(resp)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// DownloadPlugin calls GET /api/v1/plugins/download and returns the ZIP stream.
+func (c *Client) DownloadPlugin(ref, version string) (io.ReadCloser, error) {
+	ns, slug := splitNamespaceRef(ref)
+	params := url.Values{"slug": {slug}, "version": {version}}
+	if ns != "" {
+		params.Set("namespace", ns)
+	}
+	resp, err := c.do("GET", "/api/v1/plugins/download?"+params.Encode(), nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		return nil, parseAPIError(resp)
+	}
+	return resp.Body, nil
+}
+
+// PublishPlugin calls POST /api/v1/plugins with multipart form.
+func (c *Client) PublishPlugin(slug, version, summary, tags, changelog, category, namespace string, files map[string][]byte) (map[string]interface{}, error) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	for k, v := range map[string]string{
+		"slug":      slug,
+		"version":   version,
+		"summary":   summary,
+		"tags":      tags,
+		"changelog": changelog,
+		"category":  category,
+		"namespace": namespace,
+	} {
+		if v != "" {
+			_ = writer.WriteField(k, v)
+		}
+	}
+	for name, content := range files {
+		part, err := writer.CreateFormFile("files", name)
+		if err != nil {
+			return nil, fmt.Errorf("creating form file: %w", err)
+		}
+		if _, err := part.Write(content); err != nil {
+			return nil, fmt.Errorf("writing file content: %w", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("closing multipart writer: %w", err)
+	}
+
+	resp, err := c.do("POST", "/api/v1/plugins", &buf, writer.FormDataContentType())
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return nil, parseAPIError(resp)
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return result, nil
+}
+
+func (c *Client) DeletePlugin(ref string) error {
+	return c.pluginAction("DELETE", pluginPath(ref), nil)
+}
+
+func (c *Client) UndeletePlugin(ref string) error {
+	return c.pluginAction("POST", pluginPath(ref)+"/undelete", nil)
+}
+
+func (c *Client) YankPluginVersion(ref, version, reason string) error {
+	payload, _ := json.Marshal(map[string]string{"reason": reason})
+	return c.pluginAction("POST", pluginPath(ref)+"/versions/"+url.PathEscape(version)+"/yank", bytes.NewReader(payload))
+}
+
+func (c *Client) UnyankPluginVersion(ref, version string) error {
+	return c.pluginAction("DELETE", pluginPath(ref)+"/versions/"+url.PathEscape(version)+"/yank", nil)
+}
+
+func (c *Client) pluginAction(method, path string, body io.Reader) error {
+	contentType := ""
+	if body != nil {
+		contentType = "application/json"
+	}
+	resp, err := c.do(method, path, body, contentType)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return parseAPIError(resp)
+	}
+	return nil
 }
 
 // ============================================================================

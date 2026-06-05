@@ -602,6 +602,16 @@ Commands:
     --summary <text>            Short description
     --changelog <text>          Changelog for this version
 
+  plugin <subcmd>               Manage Codex plugins
+    publish <path> [flags]      Publish a plugin (.codex-plugin/plugin.json or plugin.json)
+    list                        List plugins from the registry
+    inspect <slug>              Show plugin metadata
+    install <slug>              Install plugin locally (default: ~/plugins)
+    update [--all] [slug...]    Update installed plugins
+    delete|undelete <slug>      Registry lifecycle operations
+    yank|unyank <slug> <ver>    Version lifecycle operations
+  Run 'skillhub plugin help' for full flag reference.
+
   team-token <subcmd>           Manage namespace-bound team tokens
     list <namespace>            List active team tokens
     create <namespace> [flags]  Create a team token (--label, --scope, --expires-in REQUIRED)
@@ -609,7 +619,8 @@ Commands:
   Run 'skillhub team-token help' for full flag reference.
 
 Configuration is stored in ~/.skillhub/config.yaml
-Installed skills are stored in ~/.skillhub/skills/ (configurable via skills_dir in config.yaml)`)
+Installed skills are stored in ~/.skillhub/skills/ (configurable via skills_dir in config.yaml)
+Installed plugins are stored in ~/plugins/ (configurable via plugins_dir in config.yaml)`)
 }
 
 // --- helpers ---

@@ -9,9 +9,10 @@ import (
 )
 
 type CLIConfig struct {
-	Registry  string `yaml:"registry"`
-	Token     string `yaml:"token"`
-	SkillsDir string `yaml:"skills_dir,omitempty"`
+	Registry   string `yaml:"registry"`
+	Token      string `yaml:"token"`
+	SkillsDir  string `yaml:"skills_dir,omitempty"`
+	PluginsDir string `yaml:"plugins_dir,omitempty"`
 }
 
 func configDir() string {
@@ -40,6 +41,24 @@ func SkillsDir(cfg *CLIConfig) string {
 		return dir
 	}
 	return filepath.Join(configDir(), "skills")
+}
+
+// PluginsDir returns the directory where Codex plugins are installed.
+// Defaults to ~/plugins, matching Codex's personal plugin scaffold convention.
+func PluginsDir(cfg *CLIConfig) string {
+	if cfg != nil && cfg.PluginsDir != "" {
+		dir := cfg.PluginsDir
+		if len(dir) > 1 && dir[:2] == "~/" {
+			home, _ := os.UserHomeDir()
+			dir = filepath.Join(home, dir[2:])
+		}
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(configDir(), "plugins")
+	}
+	return filepath.Join(home, "plugins")
 }
 
 func LoadConfig() (*CLIConfig, error) {

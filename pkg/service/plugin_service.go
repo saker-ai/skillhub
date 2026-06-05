@@ -14,12 +14,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/saker-ai/skillhub/pkg/repository"
 	"github.com/saker-ai/skillhub/pkg/search"
 	"github.com/saker-ai/skillhub/pkg/semver"
 	"github.com/saker-ai/skillhub/pkg/store"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -59,22 +59,84 @@ func NewPluginService(db *gorm.DB, repo *repository.PluginRepo, fs store.Store, 
 }
 
 type PluginPublishInput struct {
-	Slug          string
-	Version       string
-	Category      string
-	DisplayName   string
-	Summary       string
-	Changelog     string
-	Tags          []string
-	Files         map[string][]byte
-	OwnerID       uuid.UUID
-	NamespaceSlug string
-	User          *model.User
+	Slug           string
+	Version        string
+	Category       string
+	DisplayName    string
+	Summary        string
+	Changelog      string
+	Tags           []string
+	Files          map[string][]byte
+	OwnerID        uuid.UUID
+	NamespaceSlug  string
+	User           *model.User
+	TokenNamespace *uuid.UUID
 }
 
 type PluginPublishResult struct {
 	Plugin  model.Plugin
 	Version model.PluginVersion
+}
+
+func pluginStorageSlug(namespace, slug string) string {
+	if namespace == "" {
+		return slug
+	}
+	return namespace + "__" + slug
+}
+
+func parsePluginRef(ref string) model.SkillRef {
+	if strings.HasPrefix(ref, "@") {
+		if idx := strings.IndexByte(ref[1:], '/'); idx > 0 {
+			return model.SkillRef{Namespace: ref[1 : idx+1], Slug: ref[idx+2:]}
+		}
+	}
+	return model.SkillRef{Slug: ref}
+}
+
+func (s *PluginService) resolvePluginRef(ctx context.Context, ref string, includeDeleted bool) (*model.PluginWithOwner, error) {
+	parsed := parsePluginRef(ref)
+	if parsed.IsQualified() {
+		if s.nsSvc == nil {
+			return nil, nil
+		}
+		ns, err := s.nsSvc.GetBySlug(ctx, parsed.Namespace)
+		if err != nil || ns == nil {
+			return nil, nil
+		}
+		if includeDeleted {
+			return s.pluginRepo.GetByNSAndSlugIncludeDeleted(ctx, ns.ID, parsed.Slug)
+		}
+		return s.pluginRepo.GetByNSAndSlug(ctx, ns.ID, parsed.Slug)
+	}
+
+	var all []model.PluginWithOwner
+	var err error
+	if includeDeleted {
+		all, err = s.pluginRepo.GetBySlugGlobalIncludeDeleted(ctx, parsed.Slug)
+	} else {
+		all, err = s.pluginRepo.GetBySlugGlobal(ctx, parsed.Slug)
+	}
+	if err != nil {
+		return nil, err
+	}
+	switch len(all) {
+	case 0:
+		return nil, nil
+	case 1:
+		return &all[0], nil
+	default:
+		candidates := make([]AmbiguousCandidate, 0, len(all))
+		for i := range all {
+			candidates = append(candidates, AmbiguousCandidate{
+				Namespace:   all[i].NamespaceSlug,
+				Slug:        all[i].Slug,
+				OwnerHandle: all[i].OwnerHandle,
+				SkillID:     all[i].ID.String(),
+			})
+		}
+		return nil, &AmbiguousSlugError{Slug: parsed.Slug, Candidates: candidates}
+	}
 }
 
 func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (*PluginPublishResult, error) {
@@ -102,6 +164,15 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 			if err != nil || ns == nil {
 				return nil, fmt.Errorf("namespace '%s' not found", input.NamespaceSlug)
 			}
+			if input.User != nil {
+				can, err := s.nsSvc.CanPublish(ctx, input.NamespaceSlug, input.User.ID)
+				if err != nil {
+					return nil, fmt.Errorf("check namespace membership: %w", err)
+				}
+				if !can && !input.User.IsAdmin() {
+					return nil, fmt.Errorf("%w: not a member of namespace '%s'", ErrForbidden, input.NamespaceSlug)
+				}
+			}
 			nsID = &ns.ID
 		} else if input.User != nil {
 			ns, err := s.nsSvc.EnsurePersonalNamespace(ctx, input.User)
@@ -110,6 +181,11 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 			}
 			nsID = &ns.ID
 			input.NamespaceSlug = ns.Slug
+		}
+	}
+	if input.TokenNamespace != nil {
+		if nsID == nil || *nsID != *input.TokenNamespace {
+			return nil, fmt.Errorf("%w: team token can only publish to its bound namespace", ErrForbidden)
 		}
 	}
 
@@ -175,9 +251,10 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 
 	// Store files via the standard Publish interface.
 	// We use "_plugins_" as the owner namespace to separate from skill storage.
+	storageSlug := pluginStorageSlug(input.NamespaceSlug, input.Slug)
 	_, storeErr := s.fileStore.Publish(ctx, store.PublishOpts{
 		Owner:   "_plugins_",
-		Slug:    input.Slug,
+		Slug:    storageSlug,
 		Version: input.Version,
 		Files:   input.Files,
 		Author:  input.OwnerID.String(),
@@ -248,7 +325,7 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 		return nil
 	}); err != nil {
 		if !errors.Is(err, ErrConflict) && !errors.Is(err, ErrValidation) {
-			if cleanErr := s.fileStore.DeleteVersion(ctx, "_plugins_", input.Slug, input.Version); cleanErr != nil {
+			if cleanErr := s.fileStore.DeleteVersion(ctx, "_plugins_", storageSlug, input.Version); cleanErr != nil {
 				s.loggerOrDefault().Warn("failed to clean orphaned plugin files",
 					"slug", input.Slug, "version", input.Version, "err", cleanErr)
 			}
@@ -290,13 +367,13 @@ func (s *PluginService) Publish(ctx context.Context, input PluginPublishInput) (
 	return &PluginPublishResult{Plugin: plug, Version: ver}, nil
 }
 
-func (s *PluginService) Get(ctx context.Context, slug string) (*model.PluginWithOwner, error) {
-	p, err := s.pluginRepo.GetWithOwner(ctx, slug)
+func (s *PluginService) Get(ctx context.Context, ref string) (*model.PluginWithOwner, error) {
+	p, err := s.resolvePluginRef(ctx, ref, false)
 	if err != nil {
-		if isNotFound(err) {
-			return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
-		}
 		return nil, fmt.Errorf("get plugin: %w", err)
+	}
+	if p == nil {
+		return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, ref)
 	}
 	return p, nil
 }
@@ -305,29 +382,29 @@ func (s *PluginService) List(ctx context.Context, opts repository.PluginListOpti
 	return s.pluginRepo.List(ctx, opts)
 }
 
-func (s *PluginService) Versions(ctx context.Context, slug string) ([]model.PluginVersion, error) {
-	p, err := s.pluginRepo.GetBySlug(ctx, slug)
+func (s *PluginService) Versions(ctx context.Context, ref string) ([]model.PluginVersion, error) {
+	p, err := s.resolvePluginRef(ctx, ref, false)
 	if err != nil {
-		if isNotFound(err) {
-			return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
-		}
 		return nil, fmt.Errorf("get plugin: %w", err)
+	}
+	if p == nil {
+		return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, ref)
 	}
 	return s.pluginRepo.ListVersions(ctx, p.ID)
 }
 
-func (s *PluginService) GetFile(ctx context.Context, slug, version, filePath string) ([]byte, error) {
+func (s *PluginService) GetFile(ctx context.Context, ref, version, filePath string) ([]byte, error) {
 	filePath = store.SanitizeStorePath(filePath)
 	if filePath == "invalid" {
 		return nil, fmt.Errorf("%w: invalid file path", ErrValidation)
 	}
 
-	p, err := s.pluginRepo.GetBySlug(ctx, slug)
+	p, err := s.resolvePluginRef(ctx, ref, false)
 	if err != nil {
-		if isNotFound(err) {
-			return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
-		}
 		return nil, fmt.Errorf("get plugin: %w", err)
+	}
+	if p == nil {
+		return nil, fmt.Errorf("%w: plugin %s", ErrNotFound, ref)
 	}
 
 	if version == "" || version == "latest" {
@@ -338,20 +415,20 @@ func (s *PluginService) GetFile(ctx context.Context, slug, version, filePath str
 		version = v.Version
 	}
 
-	data, err := s.fileStore.GetFile(ctx, "_plugins_", slug, version, filePath)
+	data, err := s.fileStore.GetFile(ctx, "_plugins_", pluginStorageSlug(p.NamespaceSlug, p.Slug), version, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: file not found", ErrNotFound)
 	}
 	return data, nil
 }
 
-func (s *PluginService) Download(ctx context.Context, slug, version string) (io.ReadCloser, string, error) {
-	p, err := s.pluginRepo.GetBySlug(ctx, slug)
+func (s *PluginService) Download(ctx context.Context, ref, version string) (io.ReadCloser, string, error) {
+	p, err := s.resolvePluginRef(ctx, ref, false)
 	if err != nil {
-		if isNotFound(err) {
-			return nil, "", fmt.Errorf("%w: plugin %s", ErrNotFound, slug)
-		}
 		return nil, "", fmt.Errorf("get plugin: %w", err)
+	}
+	if p == nil {
+		return nil, "", fmt.Errorf("%w: plugin %s", ErrNotFound, ref)
 	}
 
 	if version == "" || version == "latest" {
@@ -370,7 +447,7 @@ func (s *PluginService) Download(ctx context.Context, slug, version string) (io.
 		}
 	}
 
-	reader, err := s.fileStore.Archive(ctx, "_plugins_", slug, version)
+	reader, err := s.fileStore.Archive(ctx, "_plugins_", pluginStorageSlug(p.NamespaceSlug, p.Slug), version)
 	if err != nil {
 		return nil, "", fmt.Errorf("build archive: %w", err)
 	}
@@ -417,7 +494,6 @@ func (s *PluginService) ParseMultipartPublish(form *multipart.Form) (*PluginPubl
 	return input, nil
 }
 
-
 func validatePluginManifest(data []byte, files map[string][]byte) error {
 	var manifest struct {
 		Name    string `json:"name"`
@@ -459,7 +535,6 @@ func validatePluginManifest(data []byte, files map[string][]byte) error {
 	return nil
 }
 
-
 type fileManifestEntry struct {
 	Path   string `json:"path"`
 	Size   int    `json:"size"`
@@ -484,4 +559,3 @@ func buildFilesManifest(files map[string][]byte) []fileManifestEntry {
 	}
 	return entries
 }
-

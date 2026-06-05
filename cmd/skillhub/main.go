@@ -10,13 +10,13 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub"
 	"github.com/saker-ai/skillhub/pkg/auth"
 	"github.com/saker-ai/skillhub/pkg/cli"
 	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/saker-ai/skillhub/pkg/repository"
-	"github.com/google/uuid"
 
 	// Blank imports register all built-in store backends with the driver
 	// registry (pkg/store). 独立二进制保持「全功能」语义——支持
@@ -94,6 +94,8 @@ func main() {
 		cli.Update(os.Args[2:])
 	case "publish":
 		cli.Publish(os.Args[2:])
+	case "plugin", "plugins":
+		cli.Plugins(os.Args[2:])
 	case "team-token", "team-tokens":
 		cli.TeamTokens(os.Args[2:])
 	case "help", "--help", "-h":
