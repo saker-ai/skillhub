@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/saker-ai/skillhub/pkg/middleware"
-	"github.com/saker-ai/skillhub/web"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/saker-ai/skillhub/pkg/middleware"
+	"github.com/saker-ai/skillhub/web"
 )
 
 // RegisterRoutes 把 SkillHub 的全部 HTTP API 挂到给定 router 上。
@@ -39,20 +39,14 @@ import (
 // 嵌入方如果不希望某些路由出现，可以选择不调用本方法、改为只手动挂自己关心的子集
 // （目前 SkillHub 暂不提供细粒度路由开关——按 KISS 原则等真正出现需求再加）。
 func (s *Server) RegisterRoutes(r gin.IRouter) {
+	s.registerHumaDocs(r)
+
 	// Well-known
 	r.GET("/.well-known/clawhub.json", s.h.wellKnown.ClawHubJSON)
 
 	// Agent-readable install/operations guide.
 	// Discoverable via "Read https://<host>/skills.md and follow the instructions".
 	r.GET("/skills.md", s.h.wellKnown.InstallMarkdown)
-
-	// OpenAPI 3.1 spec + Swagger UI.
-	//   /api/v1/openapi.{yaml,json}  机器可读规范（同一份 YAML 两种格式）
-	//   /api/docs                    浏览器友好的 Swagger UI（CDN）
-	// 公开访问、不需要鉴权——契约本身不泄露任何用户数据。
-	r.GET("/api/v1/openapi.yaml", s.h.openapi.SpecYAML)
-	r.GET("/api/v1/openapi.json", s.h.openapi.SpecJSON)
-	r.GET("/api/docs", s.h.openapi.UI)
 
 	// OAuth routes
 	r.GET("/auth/:provider", s.h.oauth.Redirect)

@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/gin-gonic/gin"
+	"github.com/saker-ai/skillhub/pkg/config"
 )
 
 type WellKnownHandler struct {
@@ -29,8 +29,8 @@ func (h *WellKnownHandler) ClawHubJSON(c *gin.Context) {
 			"whoami":       "/api/v1/whoami",
 			"publish":      "/api/v1/skills",
 			"installGuide": "/skills.md",
-			"openapi":      "/api/v1/openapi.yaml",
-			"apiDocs":      "/api/docs",
+			"openapi":      "/openapi.json",
+			"apiDocs":      "/docs",
 		},
 	})
 }

@@ -312,33 +312,24 @@ func TestHub_ClawHubJSON_AdvertisesInstallGuide(t *testing.T) {
 			got.Endpoints["installGuide"], got.Endpoints)
 	}
 	// 同一发现文档同时把 OpenAPI / Swagger UI 暴露出来，避免 agent 自己猜路径。
-	if got.Endpoints["openapi"] != "/api/v1/openapi.yaml" {
-		t.Errorf("clawhub.json endpoints.openapi = %q, want /api/v1/openapi.yaml (full=%v)",
+	if got.Endpoints["openapi"] != "/openapi.json" {
+		t.Errorf("clawhub.json endpoints.openapi = %q, want /openapi.json (full=%v)",
 			got.Endpoints["openapi"], got.Endpoints)
 	}
-	if got.Endpoints["apiDocs"] != "/api/docs" {
-		t.Errorf("clawhub.json endpoints.apiDocs = %q, want /api/docs (full=%v)",
+	if got.Endpoints["apiDocs"] != "/docs" {
+		t.Errorf("clawhub.json endpoints.apiDocs = %q, want /docs (full=%v)",
 			got.Endpoints["apiDocs"], got.Endpoints)
 	}
 }
 
-// TestHub_OpenAPI_ExposesSpec 验证 Swagger 四件套：
-//   - /api/v1/openapi.yaml 返回原始 YAML 且包含我们手写的关键字段
-//   - /api/v1/openapi.json 是合法 JSON，能解析出 openapi/info/paths 三大块
-//   - /api/docs            返回 Swagger UI HTML，引用 /swagger-init.js（外置脚本，
-//     满足严格 CSP），不再内联 spec URL
-//   - /swagger-init.js     由 RegisterStatic 从 embed.FS 提供，里面把 spec URL
-//     指向 /api/v1/openapi.json
-//
-// 这些断言看似机械，但它们守住「spec 真的被嵌入 + UI 真的指向同一份 spec」
-// 这条最容易被静默打破的契约——任何一环断裂（HTML 找不到 init 脚本、
-// init 脚本拿不到 spec URL、static FS 没把 swagger-init.js 嵌进去）都会被这里捕获。
+// TestHub_OpenAPI_ExposesSpec 验证 Huma + humagin 文档契约：
+//   - /openapi.json 是 Huma 原生 OpenAPI 3.1 规范
+//   - /api/v1/openapi.{json,yaml} 保持为同一份规范的兼容别名
+//   - /docs 是 Huma 原生文档页，/api/docs 内部转发兼容旧链接
 func TestHub_OpenAPI_ExposesSpec(t *testing.T) {
 	hub := newTestHub(t)
 	engine := gin.New()
 	hub.RegisterRoutes(engine)
-	// /swagger-init.js 由 RegisterStatic 提供（vendored from embed.FS），
-	// 必须挂上才能验证完整的 HTML→init.js→spec URL 链条。
 	hub.RegisterStatic(engine)
 
 	t.Run("yaml spec served", func(t *testing.T) {
@@ -369,15 +360,15 @@ func TestHub_OpenAPI_ExposesSpec(t *testing.T) {
 	})
 
 	t.Run("json spec served", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)
+		req := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)
 		w := httptest.NewRecorder()
 		engine.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
-			t.Fatalf("openapi.json status = %d, want 200; body=%s", w.Code, w.Body.String())
+			t.Fatalf("/openapi.json status = %d, want 200; body=%s", w.Code, w.Body.String())
 		}
 		ct := w.Header().Get("Content-Type")
-		if !strings.HasPrefix(ct, "application/json") {
-			t.Errorf("Content-Type = %q, want application/json*", ct)
+		if !strings.HasPrefix(ct, "application/openapi+json") && !strings.HasPrefix(ct, "application/json") {
+			t.Errorf("Content-Type = %q, want OpenAPI JSON", ct)
 		}
 		var doc map[string]any
 		if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
@@ -401,56 +392,37 @@ func TestHub_OpenAPI_ExposesSpec(t *testing.T) {
 		}
 	})
 
-	t.Run("swagger ui served", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/docs", nil)
+	t.Run("legacy json alias served", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)
 		w := httptest.NewRecorder()
 		engine.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
-			t.Fatalf("/api/docs status = %d, want 200; body=%s", w.Code, w.Body.String())
+			t.Fatalf("/api/v1/openapi.json status = %d, want 200; body=%s", w.Code, w.Body.String())
 		}
-		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-			t.Errorf("/api/docs Content-Type = %q, want text/html*", ct)
-		}
-		body := w.Body.String()
-		// HTML 引用了三件套：vendor 的 swagger-ui CSS/JS + 外置 init 脚本。
-		// init 脚本承载 spec URL（外置而非内联是为了满足严格 CSP 的 script-src 'self'）。
-		for _, marker := range []string{
-			"/swagger/swagger-ui.css",
-			"/swagger/swagger-ui-bundle.js",
-			"/swagger-init.js",
-		} {
-			if !strings.Contains(body, marker) {
-				t.Errorf("/api/docs HTML missing %q; head=%q",
-					marker, body[:min(400, len(body))])
-			}
+		if !strings.HasPrefix(w.Header().Get("Content-Type"), "application/json") {
+			t.Errorf("Content-Type = %q, want application/json*", w.Header().Get("Content-Type"))
 		}
 	})
 
-	t.Run("swagger init script served", func(t *testing.T) {
-		// /swagger-init.js 必须由 RegisterStatic 从 embed.FS 提供（不能掉到 NoRoute
-		// SPA 兜底，否则浏览器拿到 HTML 当 JS 解析直接 SyntaxError）。
-		req := httptest.NewRequest(http.MethodGet, "/swagger-init.js", nil)
-		w := httptest.NewRecorder()
-		engine.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("/swagger-init.js status = %d, want 200; body=%s",
-				w.Code, w.Body.String())
-		}
-		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") &&
-			!strings.HasPrefix(ct, "application/javascript") {
-			t.Errorf("/swagger-init.js Content-Type = %q, want *javascript*", ct)
-		}
-		body := w.Body.String()
-		// init 脚本里实际把 spec URL 喂给 SwaggerUIBundle —— 这是契约的最后一环。
-		if !strings.Contains(body, "/api/v1/openapi.json") {
-			t.Errorf("/swagger-init.js missing /api/v1/openapi.json reference; head=%q",
-				body[:min(400, len(body))])
-		}
-		if !strings.Contains(body, "SwaggerUIBundle") {
-			t.Errorf("/swagger-init.js doesn't initialize SwaggerUIBundle; head=%q",
-				body[:min(400, len(body))])
-		}
-	})
+	for _, path := range []string{"/docs", "/api/docs"} {
+		t.Run("huma docs served "+path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, want 200; body=%s", path, w.Code, w.Body.String())
+			}
+			if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+				t.Errorf("%s Content-Type = %q, want text/html*", path, ct)
+			}
+			body := w.Body.String()
+			for _, marker := range []string{"SkillHub API Reference", "@stoplight/elements"} {
+				if !strings.Contains(body, marker) {
+					t.Errorf("%s HTML missing %q; head=%q", path, marker, body[:min(400, len(body))])
+				}
+			}
+		})
+	}
 }
 
 // TestHub_NewDefaultEngine_HasMiddleware 简单验证默认 engine 能处理请求。

@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.22
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.103.2
 	github.com/blevesearch/bleve/v2 v2.6.0
+	github.com/danielgtaylor/huma/v2 v2.38.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-git/go-git/v5 v5.19.1
