@@ -76,11 +76,11 @@ func userFromPrincipal(principal *internaljwt.Principal) *model.User {
 	role := "user"
 	for _, r := range principal.Roles {
 		switch r {
-		case "admin":
-			role = "admin"
-		case "moderator":
-			if role != "admin" {
-				role = "moderator"
+		case internaljwt.RoleAdmin:
+			role = internaljwt.RoleAdmin
+		case internaljwt.RoleModerator:
+			if role != internaljwt.RoleAdmin {
+				role = internaljwt.RoleModerator
 			}
 		}
 	}
@@ -102,11 +102,11 @@ func skillhubScope(scopes []string) string {
 	out := "read"
 	for _, scope := range scopes {
 		switch scope {
-		case "skillhub:admin":
+		case internaljwt.ScopeSkillHubAdmin:
 			return "full"
-		case "skillhub:write":
+		case internaljwt.ScopeSkillHubWrite:
 			out = "full"
-		case "skillhub:read":
+		case internaljwt.ScopeSkillHubRead:
 			if out == "" {
 				out = "read"
 			}
