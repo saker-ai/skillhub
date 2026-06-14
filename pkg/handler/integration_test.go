@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/saker-ai/skillhub/pkg/search"
-	"github.com/gin-gonic/gin"
 )
 
 // Integration tests: wire up a full gin router and test complete HTTP flows.

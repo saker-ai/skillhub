@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/google/uuid"
+	"github.com/saker-ai/skillhub/pkg/model"
 )
 
 // IdentityProvider 解析当前 HTTP 请求背后的调用者身份。

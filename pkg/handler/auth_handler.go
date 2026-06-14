@@ -3,11 +3,11 @@ package handler
 import (
 	"net/http"
 
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub/pkg/auth"
 	"github.com/saker-ai/skillhub/pkg/middleware"
 	"github.com/saker-ai/skillhub/pkg/repository"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 type AuthHandler struct {

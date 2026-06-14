@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/saker-ai/skillhub/pkg/middleware"
-	"github.com/saker-ai/skillhub/pkg/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/saker-ai/skillhub/pkg/middleware"
+	"github.com/saker-ai/skillhub/pkg/service"
 )
 
 type CommentHandler struct {

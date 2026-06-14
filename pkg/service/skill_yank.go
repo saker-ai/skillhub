@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/google/uuid"
+	"github.com/saker-ai/skillhub/pkg/model"
 )
 
 // NOTE: All public methods in this file take model.SkillRef instead of slug string.

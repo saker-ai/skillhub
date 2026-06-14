@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/saker-ai/skillhub/pkg/middleware"
 	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/saker-ai/skillhub/pkg/search"
-	"github.com/gin-gonic/gin"
 	"github.com/yuin/goldmark"
 )
 

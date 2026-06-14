@@ -17,9 +17,9 @@ package repository
 import (
 	"time"
 
-	"github.com/saker-ai/skillhub/pkg/model"
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/saker-ai/skillhub/pkg/model"
 )
 
 // SkillCache 包装 *expirable.LRU 加上可选的命中/未命中 prometheus 计数器。

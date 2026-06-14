@@ -4,21 +4,21 @@ import "testing"
 
 func TestParseSkillRef(t *testing.T) {
 	tests := []struct {
-		input     string
-		wantNS    string
-		wantSlug  string
-		wantQual  bool
-		wantStr   string
+		input    string
+		wantNS   string
+		wantSlug string
+		wantQual bool
+		wantStr  string
 	}{
 		{"my-skill", "", "my-skill", false, "my-skill"},
 		{"@alice/my-skill", "alice", "my-skill", true, "@alice/my-skill"},
 		{"@team-x/lint-rules", "team-x", "lint-rules", true, "@team-x/lint-rules"},
 		{"@ns/a", "ns", "a", true, "@ns/a"},
 		// Edge cases: malformed refs treated as bare slugs
-		{"@/slug", "", "@/slug", false, "@/slug"},     // empty namespace
-		{"@ns/", "", "@ns/", false, "@ns/"},            // empty slug
-		{"@ns", "", "@ns", false, "@ns"},               // no slash
-		{"", "", "", false, ""},                         // empty
+		{"@/slug", "", "@/slug", false, "@/slug"}, // empty namespace
+		{"@ns/", "", "@ns/", false, "@ns/"},       // empty slug
+		{"@ns", "", "@ns", false, "@ns"},          // no slash
+		{"", "", "", false, ""},                   // empty
 		{"plain-slug", "", "plain-slug", false, "plain-slug"},
 	}
 

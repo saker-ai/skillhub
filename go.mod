@@ -16,12 +16,15 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/prometheus/client_golang v1.23.2
+	github.com/saker-ai/internaljwt v0.0.0
 	github.com/yuin/goldmark v1.8.2
 	golang.org/x/crypto v0.52.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 )
+
+replace github.com/saker-ai/internaljwt => ../internaljwt
 
 require (
 	dario.cat/mergo v1.0.2 // indirect

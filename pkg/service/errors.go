@@ -30,10 +30,10 @@ var ErrConflict = errors.New("conflict")
 // AmbiguousCandidate is one entry in the disambiguation list returned when
 // a bare slug matches multiple skills across namespaces.
 type AmbiguousCandidate struct {
-	Namespace string `json:"namespace"`
-	Slug      string `json:"slug"`
+	Namespace   string `json:"namespace"`
+	Slug        string `json:"slug"`
 	OwnerHandle string `json:"ownerHandle"`
-	SkillID   string `json:"skillId"`
+	SkillID     string `json:"skillId"`
 }
 
 // AmbiguousSlugError is returned when a bare slug (without namespace qualifier)

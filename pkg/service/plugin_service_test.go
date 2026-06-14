@@ -9,7 +9,7 @@ import (
 
 func TestComputePluginFingerprint_Deterministic(t *testing.T) {
 	files := map[string][]byte{
-		"plugin.json": []byte(`{"name":"test","version":"1.0.0"}`),
+		"plugin.json":       []byte(`{"name":"test","version":"1.0.0"}`),
 		"skills/a/SKILL.md": []byte("# skill a"),
 	}
 
@@ -62,7 +62,7 @@ func TestComputePluginFingerprint_OrderIndependent(t *testing.T) {
 
 func TestBuildFilesManifest(t *testing.T) {
 	files := map[string][]byte{
-		"plugin.json": []byte(`{"name":"test"}`),
+		"plugin.json":       []byte(`{"name":"test"}`),
 		"skills/a/SKILL.md": []byte("content"),
 	}
 
@@ -97,7 +97,7 @@ func TestValidatePluginManifest_Valid(t *testing.T) {
 		"skills": {"entries": ["greet"]}
 	}`)
 	files := map[string][]byte{
-		"plugin.json": manifest,
+		"plugin.json":           manifest,
 		"skills/greet/SKILL.md": []byte("# greet"),
 	}
 
@@ -148,7 +148,7 @@ func TestValidatePluginManifest_CustomSkillsPath(t *testing.T) {
 		"skills": {"path": "my-skills", "entries": ["tool"]}
 	}`)
 	files := map[string][]byte{
-		"plugin.json": manifest,
+		"plugin.json":             manifest,
 		"my-skills/tool/SKILL.md": []byte("# tool"),
 	}
 

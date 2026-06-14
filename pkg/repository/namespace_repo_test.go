@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/saker-ai/skillhub/pkg/model"
-	"github.com/google/uuid"
 )
 
 func TestEnsurePersonalNamespace(t *testing.T) {

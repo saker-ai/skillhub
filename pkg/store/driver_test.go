@@ -16,13 +16,17 @@ type fakeBackend struct{ name string }
 func (f *fakeBackend) Publish(context.Context, store.PublishOpts) (string, error) {
 	return f.name, nil
 }
-func (*fakeBackend) Archive(context.Context, string, string, string) (io.ReadCloser, error)  { return nil, nil }
-func (*fakeBackend) GetFile(context.Context, string, string, string, string) ([]byte, error) { return nil, nil }
-func (*fakeBackend) ListVersions(context.Context, string, string) ([]string, error)          { return nil, nil }
-func (*fakeBackend) Exists(context.Context, string, string) bool                             { return false }
-func (*fakeBackend) Rename(context.Context, string, string, string) error                    { return nil }
-func (*fakeBackend) Delete(context.Context, string, string) error                            { return nil }
-func (*fakeBackend) DeleteVersion(context.Context, string, string, string) error             { return nil }
+func (*fakeBackend) Archive(context.Context, string, string, string) (io.ReadCloser, error) {
+	return nil, nil
+}
+func (*fakeBackend) GetFile(context.Context, string, string, string, string) ([]byte, error) {
+	return nil, nil
+}
+func (*fakeBackend) ListVersions(context.Context, string, string) ([]string, error) { return nil, nil }
+func (*fakeBackend) Exists(context.Context, string, string) bool                    { return false }
+func (*fakeBackend) Rename(context.Context, string, string, string) error           { return nil }
+func (*fakeBackend) Delete(context.Context, string, string) error                   { return nil }
+func (*fakeBackend) DeleteVersion(context.Context, string, string, string) error    { return nil }
 
 // 阶段 3 注册表覆盖：name 默认值 + 未知 driver + 重复注册 panic。
 //
@@ -76,17 +80,17 @@ func TestDriverRegistry(t *testing.T) {
 func TestValidatePathComponent(t *testing.T) {
 	t.Parallel()
 	cases := map[string]bool{
-		"alice":       true,
-		"my-plugin":   true,
-		"1.0.0":       true,
-		"_plugins_":   true,
-		"":            false,
-		".":           false,
-		"..":          false,
-		"../etc":      false,
-		"foo/bar":     false,
-		"foo\\bar":    false,
-		"a..b":        false,
+		"alice":     true,
+		"my-plugin": true,
+		"1.0.0":     true,
+		"_plugins_": true,
+		"":          false,
+		".":         false,
+		"..":        false,
+		"../etc":    false,
+		"foo/bar":   false,
+		"foo\\bar":  false,
+		"a..b":      false,
 	}
 	for in, want := range cases {
 		if got := store.ValidatePathComponent(in); got != want {

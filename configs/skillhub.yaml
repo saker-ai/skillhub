@@ -43,3 +43,11 @@ rate_limit:
 
 auth:
   token_prefix: "clh_"
+  internal_auth:
+    enabled: false
+    issuer: "synapse"
+    audience: "skillhub"
+    master_secret: "${SKILLHUB_INTERNAL_AUTH_MASTER_SECRET}"
+    ttl: 5m
+    clock_skew: 30s
+    allow_authorization_fallback: false

@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/saker-ai/skillhub/pkg/middleware"
 	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/saker-ai/skillhub/pkg/service"
-	"github.com/gin-gonic/gin"
 )
 
 type DownloadHandler struct {

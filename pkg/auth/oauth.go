@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/saker-ai/skillhub/pkg/repository"
-	"github.com/google/uuid"
 )
 
 // OAuthProvider holds resolved OAuth endpoints for a provider.
@@ -34,11 +34,11 @@ var oauthHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 // OAuthService handles OAuth2 authentication flows.
 type OAuthService struct {
-	providers  map[string]*OAuthProvider
-	oauthRepo  *repository.OAuthRepo
-	userRepo   *repository.UserRepo
-	authSvc    *Service
-	baseURL    string
+	providers     map[string]*OAuthProvider
+	oauthRepo     *repository.OAuthRepo
+	userRepo      *repository.UserRepo
+	authSvc       *Service
+	baseURL       string
 	stateStore    sync.Map // state -> expiresAt (server-side CSRF store)
 	done          chan struct{}
 	postLoginHook PostLoginFunc

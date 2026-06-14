@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/saker-ai/skillhub/pkg/metrics"
 	"github.com/gin-gonic/gin"
+	"github.com/saker-ai/skillhub/pkg/metrics"
 )
 
 // Metrics 是 MetricsWith(metrics.Default) 的便捷调用，向后兼容旧调用点。

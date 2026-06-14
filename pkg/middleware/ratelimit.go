@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/gin-gonic/gin"
+	"github.com/saker-ai/skillhub/pkg/config"
 )
 
 type rateBucket struct {

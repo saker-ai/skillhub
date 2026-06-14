@@ -3,10 +3,10 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/saker-ai/skillhub/pkg/auth"
-	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/saker-ai/skillhub/pkg/auth"
+	"github.com/saker-ai/skillhub/pkg/model"
 )
 
 const (

@@ -6,10 +6,10 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub/pkg/metrics"
 	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/saker-ai/skillhub/pkg/repository"
-	"github.com/google/uuid"
 )
 
 // InvitationTTL is how long a pending invitation remains valid.

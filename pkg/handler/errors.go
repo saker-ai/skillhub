@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/saker-ai/skillhub/pkg/service"
 	"github.com/gin-gonic/gin"
+	"github.com/saker-ai/skillhub/pkg/service"
 )
 
 // writeServiceError maps a service-layer error to an HTTP status + JSON body.

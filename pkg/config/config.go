@@ -98,8 +98,19 @@ type RateLimitConfig struct {
 }
 
 type AuthConfig struct {
-	TokenPrefix string                         `yaml:"token_prefix"`
-	OAuth       map[string]OAuthProviderConfig `yaml:"oauth"`
+	TokenPrefix  string                         `yaml:"token_prefix"`
+	InternalAuth InternalAuthConfig             `yaml:"internal_auth"`
+	OAuth        map[string]OAuthProviderConfig `yaml:"oauth"`
+}
+
+type InternalAuthConfig struct {
+	Enabled                    bool          `yaml:"enabled"`
+	Issuer                     string        `yaml:"issuer"`
+	Audience                   string        `yaml:"audience"`
+	MasterSecret               string        `yaml:"master_secret"`
+	TTL                        time.Duration `yaml:"ttl"`
+	ClockSkew                  time.Duration `yaml:"clock_skew"`
+	AllowAuthorizationFallback bool          `yaml:"allow_authorization_fallback"`
 }
 
 // CacheConfig 配置内存级缓存层。当前唯一消费方是 *repository.SkillRepo
@@ -120,8 +131,8 @@ type CacheConfig struct {
 type OAuthProviderConfig struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
-	BaseURL      string `yaml:"base_url"`   // for self-hosted GitLab etc.
-	SyncOrgs     bool   `yaml:"sync_orgs"`  // auto-create namespace per org membership
+	BaseURL      string `yaml:"base_url"`  // for self-hosted GitLab etc.
+	SyncOrgs     bool   `yaml:"sync_orgs"` // auto-create namespace per org membership
 }
 
 func DefaultConfig() *Config {
@@ -164,6 +175,11 @@ func DefaultConfig() *Config {
 		},
 		Auth: AuthConfig{
 			TokenPrefix: "clh_",
+			InternalAuth: InternalAuthConfig{
+				Issuer:   "synapse",
+				Audience: "skillhub",
+				TTL:      5 * time.Minute,
+			},
 		},
 		Cache: CacheConfig{
 			SkillCacheSize: 1024,
@@ -206,6 +222,31 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SKILLHUB_BASE_PATH"); v != "" {
 		cfg.Server.BasePath = "/" + strings.Trim(v, "/")
+	}
+	if v := os.Getenv("SKILLHUB_INTERNAL_AUTH_ENABLED"); v != "" {
+		cfg.Auth.InternalAuth.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("SKILLHUB_INTERNAL_AUTH_ISSUER"); v != "" {
+		cfg.Auth.InternalAuth.Issuer = v
+	}
+	if v := os.Getenv("SKILLHUB_INTERNAL_AUTH_AUDIENCE"); v != "" {
+		cfg.Auth.InternalAuth.Audience = v
+	}
+	if v := os.Getenv("SKILLHUB_INTERNAL_AUTH_MASTER_SECRET"); v != "" {
+		cfg.Auth.InternalAuth.MasterSecret = v
+	}
+	if v := os.Getenv("SKILLHUB_INTERNAL_AUTH_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Auth.InternalAuth.TTL = d
+		}
+	}
+	if v := os.Getenv("SKILLHUB_INTERNAL_AUTH_CLOCK_SKEW"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Auth.InternalAuth.ClockSkew = d
+		}
+	}
+	if v := os.Getenv("SKILLHUB_INTERNAL_AUTH_ALLOW_AUTHORIZATION_FALLBACK"); v != "" {
+		cfg.Auth.InternalAuth.AllowAuthorizationFallback = v == "true" || v == "1"
 	}
 	if v := os.Getenv("SKILLHUB_DB_DRIVER"); v != "" {
 		cfg.Database.Driver = v

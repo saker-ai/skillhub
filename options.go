@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/saker-ai/skillhub/pkg/auth"
 	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/saker-ai/skillhub/pkg/metrics"
-	"github.com/prometheus/client_golang/prometheus"
 	"gorm.io/gorm"
 )
 

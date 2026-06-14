@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gin-gonic/gin"
 	"github.com/saker-ai/skillhub/pkg/metrics"
 	"github.com/saker-ai/skillhub/pkg/search"
-	"github.com/gin-gonic/gin"
 )
 
 type SearchHandler struct {

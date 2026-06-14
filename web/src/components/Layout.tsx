@@ -5,14 +5,28 @@ import { logout } from '../api/auth';
 import ThemeToggle from './ThemeToggle';
 import LangSwitch from './LangSwitch';
 
+function isEmbedded() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('embed') === '1' || window.self !== window.top;
+}
+
 export default function Layout() {
   const { t } = useTranslation();
   const { user, refresh } = useAuth();
+  const embedded = isEmbedded();
 
   const handleLogout = async () => {
     await logout();
     await refresh();
   };
+
+  if (embedded) {
+    return (
+      <main className="embedded-main">
+        <Outlet />
+      </main>
+    );
+  }
 
   return (
     <>

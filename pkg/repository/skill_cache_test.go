@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/google/uuid"
+	"github.com/saker-ai/skillhub/pkg/model"
 )
 
 func newTestSkill(slug string) *model.SkillWithOwner {

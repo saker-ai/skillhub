@@ -8,6 +8,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub/pkg/auth"
 	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/saker-ai/skillhub/pkg/gitstore"
@@ -19,8 +21,6 @@ import (
 	"github.com/saker-ai/skillhub/pkg/search"
 	"github.com/saker-ai/skillhub/pkg/service"
 	"github.com/saker-ai/skillhub/pkg/store"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -210,7 +210,21 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 	// IdentityProvider — 优先嵌入方注入，否则走默认 token-based 实现。
 	idp := deps.IdentityProvider
 	if idp == nil {
-		idp = authSvc
+		if cfg.Auth.InternalAuth.Enabled {
+			idp, err = auth.NewSynapseJWTIdentityProvider(auth.SynapseJWTConfig{
+				Issuer:                     cfg.Auth.InternalAuth.Issuer,
+				Audience:                   cfg.Auth.InternalAuth.Audience,
+				MasterSecret:               cfg.Auth.InternalAuth.MasterSecret,
+				TTL:                        cfg.Auth.InternalAuth.TTL,
+				ClockSkew:                  cfg.Auth.InternalAuth.ClockSkew,
+				AllowAuthorizationFallback: cfg.Auth.InternalAuth.AllowAuthorizationFallback,
+			})
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			idp = authSvc
+		}
 	}
 
 	// OAuth

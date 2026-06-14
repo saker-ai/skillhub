@@ -178,6 +178,12 @@ a:hover { text-decoration: none; color: var(--text); }
 
 main { flex: 1; }
 
+.embedded-main {
+  background: var(--bg);
+  min-height: 100vh;
+  padding: 0;
+}
+
 /* ═══════════════════════════════════════
    Cards — with glow hover
    ═══════════════════════════════════════ */

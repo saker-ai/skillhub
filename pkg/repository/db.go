@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/saker-ai/skillhub/pkg/config"
-	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
+	"github.com/saker-ai/skillhub/pkg/config"
+	"github.com/saker-ai/skillhub/pkg/model"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -67,7 +67,7 @@ func NewDBWithOptions(cfg config.DatabaseConfig, opts DBOptions) (*gorm.DB, erro
 		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 			return nil, fmt.Errorf("create database directory: %w", err)
 		}
-		dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000"
+		dsn := dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
 		db, err = gorm.Open(sqlite.Open(dsn), gormCfg)
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Driver)

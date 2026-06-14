@@ -29,9 +29,9 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gin-gonic/gin"
 	"github.com/saker-ai/skillhub/pkg/config"
 	"github.com/saker-ai/skillhub/pkg/server"
-	"github.com/gin-gonic/gin"
 )
 
 // Hub 是 SkillHub 的对外门面。

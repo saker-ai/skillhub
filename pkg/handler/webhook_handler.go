@@ -4,8 +4,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/saker-ai/skillhub/pkg/gitstore"
 	"github.com/gin-gonic/gin"
+	"github.com/saker-ai/skillhub/pkg/gitstore"
 )
 
 type WebhookHandler struct {
