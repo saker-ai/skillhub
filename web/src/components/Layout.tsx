@@ -2,6 +2,7 @@ import { Link, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
 import { logout } from '../api/auth';
+import { skillHubURL } from '../basePath';
 import ThemeToggle from './ThemeToggle';
 import LangSwitch from './LangSwitch';
 
@@ -40,7 +41,7 @@ export default function Layout() {
             <Link to="/skills">{t('nav.skills')}</Link>
             <Link to="/plugins">{t('nav.plugins')}</Link>
             <Link to="/publish">{t('nav.publish')}</Link>
-            <a href="/api/docs" target="_blank" rel="noopener noreferrer">{t('nav.api')}</a>
+            <a href={skillHubURL('/api/docs')} target="_blank" rel="noopener noreferrer">{t('nav.api')}</a>
             {user && <Link to="/namespaces">{t('nav.namespaces')}</Link>}
             {user ? (
               <>

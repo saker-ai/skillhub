@@ -1,8 +1,10 @@
 .PHONY: build deps dev run setup clean help quickstart test ensure-static test-static lint frontend dev-frontend dev-backend
 
+VITE_BASE_PATH ?= ./
+
 # Build frontend (React + Vite)
 frontend:
-	cd web && npm install && npm run build
+	cd web && npm install && VITE_BASE_PATH="$(VITE_BASE_PATH)" npm run build
 
 # Build the skillhub binary (includes embedded frontend)
 build: frontend

@@ -1,4 +1,4 @@
-const BP = import.meta.env.BASE_URL.replace(/\/$/, '');
+import { skillHubURL } from '../basePath';
 
 export interface User {
   id: string;
@@ -8,7 +8,7 @@ export interface User {
 
 export async function whoami(): Promise<User | null> {
   try {
-    const res = await fetch(`${BP}/api/v1/whoami`, { credentials: 'same-origin' });
+    const res = await fetch(skillHubURL('/api/v1/whoami'), { credentials: 'same-origin' });
     if (!res.ok) return null;
     return res.json();
   } catch {
@@ -18,7 +18,7 @@ export async function whoami(): Promise<User | null> {
 
 export async function login(handle: string, password: string): Promise<void> {
   const body = new URLSearchParams({ handle, password });
-  const res = await fetch(`${BP}/login`, {
+  const res = await fetch(skillHubURL('/login'), {
     method: 'POST',
     body,
     credentials: 'same-origin',
@@ -29,5 +29,5 @@ export async function login(handle: string, password: string): Promise<void> {
 }
 
 export async function logout(): Promise<void> {
-  await fetch(`${BP}/logout`, { method: 'POST', credentials: 'same-origin', redirect: 'manual' });
+  await fetch(skillHubURL('/logout'), { method: 'POST', credentials: 'same-origin', redirect: 'manual' });
 }

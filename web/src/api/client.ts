@@ -1,4 +1,6 @@
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api/v1';
+import { skillHubURL } from '../basePath';
+
+const BASE = skillHubURL('/api/v1');
 
 export class ApiError extends Error {
   status: number;

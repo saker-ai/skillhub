@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getPlugin, getPluginVersions, getPluginFile, type Plugin, type PluginVersion } from '../api/plugins';
-
-const basePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+import { skillHubURL } from '../basePath';
 
 export default function PluginDetail() {
   const { slug } = useParams<{ slug: string }>();
@@ -154,7 +153,7 @@ export default function PluginDetail() {
               {latestVersion && (
                 <div className="sidebar-section">
                   <a
-                    href={`${basePath}/api/v1/plugins/download?slug=${plugin.slug}&version=${latestVersion.version}`}
+                    href={skillHubURL(`/api/v1/plugins/download?slug=${plugin.slug}&version=${latestVersion.version}`)}
                     className="btn btn-secondary"
                     style={{ width: '100%', justifyContent: 'center' }}
                   >

@@ -13,8 +13,9 @@ import Namespaces from './pages/Namespaces';
 import NamespaceDetail from './pages/NamespaceDetail';
 import Plugins from './pages/Plugins';
 import PluginDetail from './pages/PluginDetail';
+import { skillHubBasePath } from './basePath';
 
-const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/';
+const basename = skillHubBasePath() || '/';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
