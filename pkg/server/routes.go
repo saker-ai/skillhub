@@ -30,6 +30,7 @@ import (
 //	GET  /metrics                                 prometheus scrape
 //	GET  /healthz, /readyz                        liveness / readiness
 //	GET  /api/v1/...                              public + download + authed + admin
+//	GET  /api/agent/skills...                     Agent Skill API compatibility
 //	POST /api/v1/agent/provision                  agent auto-provision
 //	POST /api/v1/webhooks/{github,gitlab,gitea}   import webhooks
 //
@@ -100,6 +101,15 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 
 	// API v1
 	api := r.Group("/api/v1")
+
+	agentSkills := r.Group("/api/agent")
+	agentSkills.Use(s.rateLimiter.RateLimit("read"))
+	agentSkills.Use(middleware.OptionalAuth(s.idp))
+	{
+		agentSkills.GET("/skills", s.h.agentSkill.List)
+		agentSkills.GET("/skills/:id", s.h.agentSkill.Get)
+		agentSkills.GET("/skills/:id/download", s.h.agentSkill.Download)
+	}
 
 	// Public endpoints (with read rate limit)
 	public := api.Group("")

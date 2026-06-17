@@ -57,26 +57,27 @@ type Deps struct {
 // 之所以用聚合 struct 而不是各自做 Server 的字段，是为了让 routes.go
 // 通过 s.h.skill 这种短路径访问，避免在路由注册段反复重复 s.skillHandler 这类长名。
 type handlers struct {
-	skill     *handler.SkillHandler
-	search    *handler.SearchHandler
-	download  *handler.DownloadHandler
-	auth      *handler.AuthHandler
-	star      *handler.StarHandler
-	admin     *handler.AdminHandler
-	audit     *handler.AuditHandler
-	token     *handler.TokenHandler
-	namespace *handler.NamespaceHandler
-	notif     *handler.NotificationHandler
-	rating    *handler.RatingHandler
-	comment   *handler.CommentHandler
-	oauth     *handler.OAuthHandler
-	device    *handler.DeviceAuthHandler
-	webhook   *handler.WebhookHandler
-	wellKnown *handler.WellKnownHandler
-	agent     *handler.AgentHandler
-	webAuth   *handler.WebAuthHandler
-	openapi   *handler.OpenAPIHandler
-	plugin    *handler.PluginHandler
+	skill      *handler.SkillHandler
+	search     *handler.SearchHandler
+	download   *handler.DownloadHandler
+	auth       *handler.AuthHandler
+	star       *handler.StarHandler
+	admin      *handler.AdminHandler
+	audit      *handler.AuditHandler
+	token      *handler.TokenHandler
+	namespace  *handler.NamespaceHandler
+	notif      *handler.NotificationHandler
+	rating     *handler.RatingHandler
+	comment    *handler.CommentHandler
+	oauth      *handler.OAuthHandler
+	device     *handler.DeviceAuthHandler
+	webhook    *handler.WebhookHandler
+	wellKnown  *handler.WellKnownHandler
+	agent      *handler.AgentHandler
+	agentSkill *handler.AgentSkillHandler
+	webAuth    *handler.WebAuthHandler
+	openapi    *handler.OpenAPIHandler
+	plugin     *handler.PluginHandler
 }
 
 // Server 持有 SkillHub 完整的运行时依赖与 HTTP handler 集合。
@@ -315,26 +316,27 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 	searchHandler := handler.NewSearchHandler(searchClient)
 	searchHandler.SetMetrics(mx)
 	h := handlers{
-		skill:     handler.NewSkillHandler(skillSvc),
-		search:    searchHandler,
-		download:  handler.NewDownloadHandler(skillSvc),
-		auth:      handler.NewAuthHandler(authSvc, userRepo),
-		star:      handler.NewStarHandler(skillSvc),
-		admin:     handler.NewAdminHandler(userRepo, skillSvc, pluginSvc, auditSvc),
-		audit:     handler.NewAuditHandler(auditSvc),
-		token:     handler.NewTokenHandler(authSvc, tokenRepo, nsSvc),
-		namespace: handler.NewNamespaceHandler(nsSvc),
-		notif:     handler.NewNotificationHandler(notifSvc),
-		rating:    handler.NewRatingHandler(ratingSvc),
-		comment:   handler.NewCommentHandler(commentSvc),
-		oauth:     handler.NewOAuthHandler(oauthSvc),
-		device:    handler.NewDeviceAuthHandler(deviceSvc),
-		webhook:   handler.NewWebhookHandler(importSvc),
-		wellKnown: handler.NewWellKnownHandler(cfg),
-		agent:     handler.NewAgentHandler(authSvc, userRepo),
-		webAuth:   handler.NewWebAuthHandler(authSvc),
-		openapi:   handler.NewOpenAPIHandler(),
-		plugin:    handler.NewPluginHandler(pluginSvc),
+		skill:      handler.NewSkillHandler(skillSvc),
+		search:     searchHandler,
+		download:   handler.NewDownloadHandler(skillSvc),
+		auth:       handler.NewAuthHandler(authSvc, userRepo),
+		star:       handler.NewStarHandler(skillSvc),
+		admin:      handler.NewAdminHandler(userRepo, skillSvc, pluginSvc, auditSvc),
+		audit:      handler.NewAuditHandler(auditSvc),
+		token:      handler.NewTokenHandler(authSvc, tokenRepo, nsSvc),
+		namespace:  handler.NewNamespaceHandler(nsSvc),
+		notif:      handler.NewNotificationHandler(notifSvc),
+		rating:     handler.NewRatingHandler(ratingSvc),
+		comment:    handler.NewCommentHandler(commentSvc),
+		oauth:      handler.NewOAuthHandler(oauthSvc),
+		device:     handler.NewDeviceAuthHandler(deviceSvc),
+		webhook:    handler.NewWebhookHandler(importSvc),
+		wellKnown:  handler.NewWellKnownHandler(cfg),
+		agent:      handler.NewAgentHandler(authSvc, userRepo),
+		agentSkill: handler.NewAgentSkillHandler(skillSvc),
+		webAuth:    handler.NewWebAuthHandler(authSvc),
+		openapi:    handler.NewOpenAPIHandler(),
+		plugin:     handler.NewPluginHandler(pluginSvc),
 	}
 
 	// Wire optional dependencies into handlers AFTER the literal — keeps
