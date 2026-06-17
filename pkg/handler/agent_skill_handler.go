@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"hash/crc32"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -103,8 +102,8 @@ func (h *AgentSkillHandler) Download(c *gin.Context) {
 }
 
 func (h *AgentSkillHandler) lookup(c *gin.Context) (model.SkillWithOwner, bool) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil || id == 0 {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid agent skill id"})
 		return model.SkillWithOwner{}, false
 	}
@@ -116,7 +115,7 @@ func (h *AgentSkillHandler) lookup(c *gin.Context) (model.SkillWithOwner, bool) 
 		return model.SkillWithOwner{}, false
 	}
 	for _, skill := range skills {
-		if uint64(agentSkillID(skill)) == id {
+		if agentSkillID(skill) == id {
 			return skill, true
 		}
 	}
@@ -191,12 +190,8 @@ func agentSkillDetailFromSkill(skill model.SkillWithOwner) agentSkillDetail {
 	}
 }
 
-func agentSkillID(skill model.SkillWithOwner) uint {
-	id := crc32.ChecksumIEEE([]byte(skillRefString(skill))) & 0x7fffffff
-	if id == 0 {
-		id = 1
-	}
-	return uint(id)
+func agentSkillID(skill model.SkillWithOwner) string {
+	return skill.ID.String()
 }
 
 func skillRef(skill model.SkillWithOwner) model.SkillRef {
@@ -271,7 +266,7 @@ func positiveInt(raw string, fallback int) int {
 }
 
 type agentSkillListItem struct {
-	ID          uint      `json:"Id"`
+	ID          string    `json:"Id"`
 	Name        string    `json:"Name"`
 	Description string    `json:"Description"`
 	Detail      string    `json:"Detail"`
@@ -287,7 +282,7 @@ type agentSkillListItem struct {
 }
 
 type agentSkillDetail struct {
-	ID             uint      `json:"Id"`
+	ID             string    `json:"Id"`
 	Name           string    `json:"Name"`
 	Description    string    `json:"Description"`
 	Detail         string    `json:"Detail"`
