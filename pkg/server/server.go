@@ -75,6 +75,7 @@ type handlers struct {
 	wellKnown  *handler.WellKnownHandler
 	agent      *handler.AgentHandler
 	agentSkill *handler.AgentSkillHandler
+	runtime    *handler.RuntimeSkillHandler
 	webAuth    *handler.WebAuthHandler
 	openapi    *handler.OpenAPIHandler
 	plugin     *handler.PluginHandler
@@ -334,6 +335,7 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 		wellKnown:  handler.NewWellKnownHandler(cfg),
 		agent:      handler.NewAgentHandler(authSvc, userRepo),
 		agentSkill: handler.NewAgentSkillHandler(skillSvc),
+		runtime:    handler.NewRuntimeSkillHandler(skillSvc),
 		webAuth:    handler.NewWebAuthHandler(authSvc),
 		openapi:    handler.NewOpenAPIHandler(),
 		plugin:     handler.NewPluginHandler(pluginSvc),

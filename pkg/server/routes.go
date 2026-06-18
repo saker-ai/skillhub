@@ -111,6 +111,19 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		agentSkills.GET("/skills/:id/download", s.h.agentSkill.Download)
 	}
 
+	runtimeSkills := r.Group("/api/runtime")
+	runtimeSkills.Use(s.rateLimiter.RateLimit("read"))
+	runtimeSkills.Use(middleware.OptionalAuth(s.idp))
+	{
+		runtimeSkills.GET("/capabilities", s.h.runtime.Capabilities)
+		runtimeSkills.POST("/skills/resolve", s.h.runtime.Resolve)
+		runtimeSkills.GET("/skills", s.h.runtime.List)
+		runtimeSkills.GET("/skills/by-id/:id", s.h.runtime.ByID)
+		runtimeSkills.GET("/skills/by-slug", s.h.runtime.BySlug)
+		runtimeSkills.GET("/skills/files", s.h.runtime.File)
+		runtimeSkills.GET("/skills/bundle", s.h.runtime.Bundle)
+	}
+
 	// Public endpoints (with read rate limit)
 	public := api.Group("")
 	public.Use(s.rateLimiter.RateLimit("read"))

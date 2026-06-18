@@ -634,6 +634,44 @@ func (s *SkillService) ResolveVersion(ctx context.Context, ref model.SkillRef, v
 	return skill, ver, nil
 }
 
+// ResolveVersionByID returns the version record for a skill ID and version
+// (accepts "latest"). It enforces the same visibility rules as ResolveVersion.
+func (s *SkillService) ResolveVersionByID(ctx context.Context, id uuid.UUID, version string, viewer *model.User) (*model.SkillWithOwner, *model.SkillVersion, error) {
+	skill, err := s.skillRepo.GetWithOwnerByID(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if skill == nil || !s.canViewSkill(ctx, skill, viewer) {
+		return nil, nil, fmt.Errorf("skill not found: %s", id)
+	}
+	return s.resolveVersionForSkill(ctx, skill, version)
+}
+
+func (s *SkillService) resolveVersionForSkill(ctx context.Context, skill *model.SkillWithOwner, version string) (*model.SkillWithOwner, *model.SkillVersion, error) {
+	if version == "" || version == "latest" {
+		if skill.LatestVersionID == nil {
+			return skill, nil, fmt.Errorf("no versions published")
+		}
+		v, err := s.versionRepo.GetByID(ctx, *skill.LatestVersionID)
+		if err != nil {
+			return skill, nil, err
+		}
+		if v == nil {
+			return skill, nil, fmt.Errorf("latest version not found")
+		}
+		return skill, v, nil
+	}
+
+	ver, err := s.versionRepo.GetBySkillAndVersion(ctx, skill.ID, version)
+	if err != nil {
+		return skill, nil, err
+	}
+	if ver == nil {
+		return skill, nil, fmt.Errorf("version %s not found", version)
+	}
+	return skill, ver, nil
+}
+
 // Download returns a zip archive for a skill version along with its fingerprint.
 func (s *SkillService) Download(ctx context.Context, ref model.SkillRef, version, identityHash string, viewer *model.User) (*DownloadResult, error) {
 	skill, ver, err := s.ResolveVersion(ctx, ref, version, viewer)
@@ -698,9 +736,11 @@ func (s *SkillService) GetFile(ctx context.Context, ref model.SkillRef, version,
 		return nil, err
 	}
 
-	// 200KB limit
-	if len(content) > 200*1024 {
-		return nil, fmt.Errorf("file too large (max 200KB)")
+	// Runtime clients lazily fetch support files. Keep a conservative
+	// single-file cap while allowing markdown/reference files larger than the
+	// old UI-focused 200 KiB limit.
+	if len(content) > 512*1024 {
+		return nil, fmt.Errorf("file too large (max 512KB)")
 	}
 	return content, nil
 }

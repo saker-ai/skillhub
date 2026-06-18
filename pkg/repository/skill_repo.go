@@ -192,6 +192,26 @@ func (r *SkillRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Skill, er
 	return &skill, err
 }
 
+// GetWithOwnerByID returns a non-deleted skill by ID with owner and namespace
+// fields populated for API responses and authorization checks.
+func (r *SkillRepo) GetWithOwnerByID(ctx context.Context, id uuid.UUID) (*model.SkillWithOwner, error) {
+	var skill model.SkillWithOwner
+	err := r.db.WithContext(ctx).
+		Table("skills").
+		Select(skillWithOwnerSelect).
+		Joins("JOIN users ON skills.owner_id = users.id").
+		Joins("LEFT JOIN namespaces ON skills.namespace_id = namespaces.id").
+		Where("skills.id = ? AND skills.soft_deleted_at IS NULL", id).
+		First(&skill).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &skill, nil
+}
+
 // ListFilter controls visibility filtering for skill listing.
 type ListFilter struct {
 	ViewerID    *uuid.UUID // nil = anonymous
