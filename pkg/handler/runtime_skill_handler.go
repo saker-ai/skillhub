@@ -572,6 +572,20 @@ func runtimeSlug(skill model.SkillWithOwner) string {
 	return skill.Slug
 }
 
+func displayName(skill model.SkillWithOwner) string {
+	if value := stringValue(skill.DisplayName); value != "" {
+		return value
+	}
+	return skill.Slug
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func skillRefFromSkill(skill model.SkillWithOwner) model.SkillRef {
 	return model.SkillRef{Namespace: skill.NamespaceSlug, Slug: skill.Slug}
 }
@@ -695,4 +709,10 @@ func runtimeRequestID(c *gin.Context) string {
 		return id
 	}
 	return requestID(c)
+}
+
+func requestID(c *gin.Context) string {
+	id := "req_" + uuid.NewString()
+	c.Set("request_id", id)
+	return id
 }
