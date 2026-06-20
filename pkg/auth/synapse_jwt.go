@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/saker-ai/internaljwt"
+	"github.com/saker-ai/saker-common/internaljwt"
 	"github.com/saker-ai/skillhub/pkg/model"
 )
 

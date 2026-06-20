@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/saker-ai/internaljwt"
+	"github.com/saker-ai/saker-common/internaljwt"
 )
 
 func TestSynapseJWTIdentityProviderIdentify(t *testing.T) {
