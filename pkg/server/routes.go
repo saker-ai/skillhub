@@ -258,6 +258,8 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		admin.GET("/skills", s.h.admin.ListAllSkills)
 		admin.POST("/skills/:slug/review", s.h.admin.ReviewSkill)
 		admin.POST("/skills/:slug/visibility", s.h.admin.SetVisibility)
+		admin.POST("/skills/@:namespace/:slug/review", s.h.admin.ReviewSkill)
+		admin.POST("/skills/@:namespace/:slug/visibility", s.h.admin.SetVisibility)
 		admin.GET("/audit-logs", s.h.audit.List)
 		admin.GET("/plugins", s.h.admin.ListAllPlugins)
 		admin.POST("/plugins/:slug/review", s.h.admin.ReviewPlugin)

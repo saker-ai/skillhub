@@ -320,6 +320,7 @@ func registerOpenAPIDocs(api huma.API) {
 	registerDoc(doc, http.MethodPost, "/api/v1/admin/users/role", "admin-users-role", "admin", "Set user role", admin, (*docMapOutput)(nil), (*docOKOutput)(nil))
 	registerDoc(doc, http.MethodGet, "/api/v1/admin/skills", "admin-skills-list", "admin", "List all skills", admin, (*docListInput)(nil), (*docSkillListOutput)(nil))
 	registerDoc(doc, http.MethodPost, "/api/v1/admin/skills/{slug}/review", "admin-skills-review", "admin", "Review skill", admin, (*docSlugInput)(nil), (*docOKOutput)(nil))
+	registerDoc(doc, http.MethodPost, "/api/v1/admin/skills/@{namespace}/{slug}/review", "admin-skills-review-qualified", "admin", "Review namespace-qualified skill", admin, (*docSlugInput)(nil), (*docOKOutput)(nil))
 	registerDoc(doc, http.MethodGet, "/api/v1/admin/audit-logs", "admin-audit-logs", "admin", "List audit logs", admin, (*docListInput)(nil), (*docMapOutput)(nil))
 	registerDoc(doc, http.MethodPost, "/api/v1/agent/provision", "agent-provision", "agent", "Provision agent token", public, (*docMapOutput)(nil), (*docMapOutput)(nil))
 }
