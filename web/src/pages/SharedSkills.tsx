@@ -1,12 +1,5 @@
-import { NativeAppPage } from '../../../../web-shared/src/pages'
-import { createStandaloneHost, nativeRoutes } from '../../../../web-shared/src/runtime'
-
-const route = nativeRoutes.find((item) => item.appId === 'skillhub')
+import { StandaloneNativeAppPage } from '../../../../web-shared/src/pages'
 
 export default function SharedSkills() {
-  if (!route) {
-    return <p className="muted">Shared SkillHub route is not configured.</p>
-  }
-  const host = createStandaloneHost({ appId: 'skillhub', apiBaseUrl: '/api/v1', proxyHref: '/skills' })
-  return <NativeAppPage host={host} route={route} />
+  return <StandaloneNativeAppPage appId="skillhub" apiBaseUrl="/api/v1" proxyHref="/skills" />
 }
