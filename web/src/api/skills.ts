@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchRaw } from './client';
+import { apiFetch, apiFetchRaw, apiUploadWithProgress } from './client';
 
 export interface Skill {
   id: string;
@@ -56,6 +56,10 @@ export function getFile(slug: string, version: string, path: string, namespace?:
 
 export function publishSkill(formData: FormData): Promise<{ skill: Skill; version: SkillVersion }> {
   return apiFetch('/skills', { method: 'POST', body: formData });
+}
+
+export function publishSkillWithProgress(formData: FormData, onProgress: (pct: number) => void): Promise<{ skill: Skill; version: SkillVersion }> {
+  return apiUploadWithProgress('/skills', formData, onProgress);
 }
 
 export function deleteSkill(slug: string, namespace?: string): Promise<void> {

@@ -2,10 +2,10 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
-import { getSkill, getVersions } from '../api/skills';
+import { getSkill, getVersions, publishSkillWithProgress } from '../api/skills';
 import { listMyNamespaces, type Namespace } from '../api/namespaces';
 import CodeBlock from '../components/CodeBlock';
-import { skillHubAbsoluteURL, skillHubURL } from '../basePath';
+import { skillHubAbsoluteURL } from '../basePath';
 import { formatDisplayName } from '../utils/displayName';
 
 interface SelectedFile {
@@ -25,39 +25,6 @@ function bumpPatch(v: string): string {
   const m = v.match(/^(\d+)\.(\d+)\.(\d+)/);
   if (!m) return '';
   return `${m[1]}.${m[2]}.${parseInt(m[3], 10) + 1}`;
-}
-
-interface UploadResult {
-  skill?: { slug: string; displayName?: string };
-  version?: { version: string; files?: unknown[] };
-  error?: string;
-}
-
-function uploadWithProgress(
-  url: string,
-  formData: FormData,
-  onProgress: (pct: number) => void,
-): Promise<UploadResult> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url, true);
-    xhr.withCredentials = true;
-    xhr.upload.addEventListener('progress', e => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-    });
-    xhr.onload = () => {
-      let body: UploadResult = {};
-      try { body = JSON.parse(xhr.responseText); } catch { /* non-json */ }
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(body);
-      } else {
-        reject(new Error(body.error || `HTTP ${xhr.status}`));
-      }
-    };
-    xhr.onerror = () => reject(new Error('Network error'));
-    xhr.ontimeout = () => reject(new Error('Upload timed out'));
-    xhr.send(formData);
-  });
 }
 
 export default function Publish() {
@@ -179,7 +146,7 @@ export default function Publish() {
     files.forEach(f => formData.append('files', f.file, f.path));
 
     try {
-      const data = await uploadWithProgress(skillHubURL('/api/v1/skills'), formData, p => setProgress(p));
+      const data = await publishSkillWithProgress(formData, p => setProgress(p));
       setStatus('');
       setProgress(100);
       setResult({
