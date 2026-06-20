@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchRaw } from './client';
+import { apiFetch, apiFetchRaw, apiURL } from './client';
 
 export interface Plugin {
   id: string;
@@ -52,4 +52,9 @@ export function getPluginVersions(slug: string): Promise<{ versions: PluginVersi
 export function getPluginFile(slug: string, version: string, path: string): Promise<Response> {
   const params = new URLSearchParams({ slug, version, path });
   return apiFetchRaw(`/plugins/file?${params}`);
+}
+
+export function pluginDownloadURL(slug: string, version: string): string {
+  const params = new URLSearchParams({ slug, version });
+  return apiURL(`/plugins/download?${params}`);
 }

@@ -3,10 +3,9 @@ import { useParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { getSkill, getVersions, getFile, type Skill, type SkillVersion } from '../api/skills';
+import { getSkill, getVersions, getFile, skillDownloadURL, type Skill, type SkillVersion } from '../api/skills';
 import { ApiError } from '../api/client';
 import CodeBlock from '../components/CodeBlock';
-import { skillHubURL } from '../basePath';
 import { formatDisplayName } from '../utils/displayName';
 
 interface AmbiguousCandidate {
@@ -229,7 +228,7 @@ export default function SkillDetail() {
               </div>
               {latestVersion && (
                 <div className="sidebar-section">
-                  <a href={skillHubURL(`/api/v1/download?slug=${skill.slug}&namespace=${skill.namespaceSlug || ''}&version=${latestVersion.version}`)} className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
+                  <a href={skillDownloadURL(skill.slug, latestVersion.version, skill.namespaceSlug || '')} className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
                     &#8615; {t('detail.download_zip')}
                   </a>
                 </div>

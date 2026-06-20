@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchRaw, apiUploadWithProgress } from './client';
+import { apiFetch, apiFetchRaw, apiUploadWithProgress, apiURL } from './client';
 
 export interface Skill {
   id: string;
@@ -60,6 +60,12 @@ export function publishSkill(formData: FormData): Promise<{ skill: Skill; versio
 
 export function publishSkillWithProgress(formData: FormData, onProgress: (pct: number) => void): Promise<{ skill: Skill; version: SkillVersion }> {
   return apiUploadWithProgress('/skills', formData, onProgress);
+}
+
+export function skillDownloadURL(slug: string, version: string, namespace = ''): string {
+  const params = new URLSearchParams({ slug, version });
+  if (namespace) params.set('namespace', namespace);
+  return apiURL(`/download?${params}`);
 }
 
 export function deleteSkill(slug: string, namespace?: string): Promise<void> {
