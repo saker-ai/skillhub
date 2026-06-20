@@ -13,6 +13,7 @@ import Namespaces from './pages/Namespaces';
 import NamespaceDetail from './pages/NamespaceDetail';
 import Plugins from './pages/Plugins';
 import PluginDetail from './pages/PluginDetail';
+import SharedSkills from './pages/SharedSkills';
 import { skillHubBasePath } from './basePath';
 
 const basename = skillHubBasePath() || '/';
@@ -37,6 +38,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Home />} />
             <Route path="/skills" element={<Skills />} />
+            <Route path="/shared-skills" element={<SharedSkills />} />
             <Route path="/skills/:slug" element={<SkillDetail />} />
             <Route path="/skills/@:namespace/:slug" element={<SkillDetail />} />
             <Route path="/search" element={<Search />} />

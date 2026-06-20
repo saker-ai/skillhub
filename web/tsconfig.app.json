@@ -7,6 +7,12 @@
     "module": "ESNext",
     "types": ["vite/client"],
     "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "react": ["node_modules/@types/react"],
+      "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime"],
+      "lucide-react": ["node_modules/lucide-react/dist/lucide-react.d.ts"]
+    },
 
     /* Bundler mode */
     "moduleResolution": "bundler",
@@ -24,6 +30,6 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"],
+  "include": ["src", "../../web-shared/src"],
   "exclude": ["src/**/*.test.ts"]
 }
