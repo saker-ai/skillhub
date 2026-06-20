@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/saker-ai/saker-common/internaljwt"
 	"github.com/saker-ai/skillhub/pkg/model"
+	"github.com/saker-ai/skillhub/pkg/repository"
 )
 
 type SynapseJWTConfig struct {
@@ -23,9 +24,10 @@ type SynapseJWTConfig struct {
 
 type SynapseJWTIdentityProvider struct {
 	verifier *internaljwt.Verifier
+	userRepo *repository.UserRepo
 }
 
-func NewSynapseJWTIdentityProvider(cfg SynapseJWTConfig) (*SynapseJWTIdentityProvider, error) {
+func NewSynapseJWTIdentityProvider(cfg SynapseJWTConfig, userRepo ...*repository.UserRepo) (*SynapseJWTIdentityProvider, error) {
 	verifier, err := internaljwt.NewVerifier(internaljwt.VerifierOptions{
 		Issuer:                     cfg.Issuer,
 		Audience:                   cfg.Audience,
@@ -37,10 +39,14 @@ func NewSynapseJWTIdentityProvider(cfg SynapseJWTConfig) (*SynapseJWTIdentityPro
 	if err != nil {
 		return nil, fmt.Errorf("synapse jwt verifier: %w", err)
 	}
-	return &SynapseJWTIdentityProvider{verifier: verifier}, nil
+	var repo *repository.UserRepo
+	if len(userRepo) > 0 {
+		repo = userRepo[0]
+	}
+	return &SynapseJWTIdentityProvider{verifier: verifier, userRepo: repo}, nil
 }
 
-func (p *SynapseJWTIdentityProvider) Identify(_ context.Context, r *http.Request) (*model.User, string, *uuid.UUID, error) {
+func (p *SynapseJWTIdentityProvider) Identify(ctx context.Context, r *http.Request) (*model.User, string, *uuid.UUID, error) {
 	principal, err := p.verifier.VerifyRequest(r)
 	if err != nil {
 		if internaljwt.IsAuthError(err) {
@@ -49,6 +55,11 @@ func (p *SynapseJWTIdentityProvider) Identify(_ context.Context, r *http.Request
 		return nil, "", nil, err
 	}
 	user := userFromPrincipal(principal)
+	if p.userRepo != nil {
+		if err := p.userRepo.UpsertIdentity(ctx, user); err != nil {
+			return nil, "", nil, err
+		}
+	}
 	scope := skillhubScope(principal.Scopes)
 	var namespaceID *uuid.UUID
 	if principal.ResourceType == "namespace" && principal.ResourceID != "" {

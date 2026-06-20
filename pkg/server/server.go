@@ -219,7 +219,7 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 				TTL:                        cfg.Auth.InternalAuth.TTL,
 				ClockSkew:                  cfg.Auth.InternalAuth.ClockSkew,
 				AllowAuthorizationFallback: cfg.Auth.InternalAuth.AllowAuthorizationFallback,
-			})
+			}, userRepo)
 			if err != nil {
 				return nil, err
 			}

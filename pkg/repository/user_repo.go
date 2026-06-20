@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub/pkg/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type UserRepo struct {
@@ -20,6 +21,25 @@ func NewUserRepo(db *gorm.DB) *UserRepo {
 
 func (r *UserRepo) Create(ctx context.Context, user *model.User) error {
 	return r.db.WithContext(ctx).Create(user).Error
+}
+
+// UpsertIdentity stores a user supplied by an external identity provider.
+// It keeps the local user row available for repository joins while allowing
+// display metadata and role claims to follow the upstream identity source.
+func (r *UserRepo) UpsertIdentity(ctx context.Context, user *model.User) error {
+	if user == nil {
+		return nil
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"handle",
+			"display_name",
+			"email",
+			"role",
+			"updated_at",
+		}),
+	}).Create(user).Error
 }
 
 func (r *UserRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
