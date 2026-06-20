@@ -59,6 +59,81 @@ func TestSynapseJWTIdentityProviderIdentify(t *testing.T) {
 	}
 }
 
+func TestSynapseJWTIdentityProviderMapsNormalizedRolesAndScopes(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	signer, err := internaljwt.NewSigner("warden", secret, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		roles    []string
+		scopes   []string
+		wantRole string
+	}{
+		{
+			name:     "tenant admin role maps to local admin",
+			roles:    []string{"tenant.admin"},
+			scopes:   []string{internaljwt.ScopeSkillHubRead},
+			wantRole: "admin",
+		},
+		{
+			name:     "skillhub admin scope maps to local admin",
+			roles:    []string{"frontend.user"},
+			scopes:   []string{internaljwt.ScopeSkillHubAdmin},
+			wantRole: "admin",
+		},
+		{
+			name:     "publisher role maps to moderator",
+			roles:    []string{"app.skillhub.publisher"},
+			scopes:   []string{internaljwt.ScopeSkillHubPublish},
+			wantRole: "moderator",
+		},
+		{
+			name:     "write scope maps to moderator",
+			roles:    []string{"frontend.user"},
+			scopes:   []string{internaljwt.ScopeSkillHubWrite},
+			wantRole: "moderator",
+		},
+	}
+
+	idp, err := NewSynapseJWTIdentityProvider(SynapseJWTConfig{
+		Issuer:       "warden",
+		Audience:     "skillhub",
+		MasterSecret: secret,
+		TTL:          5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("idp: %v", err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token, _, err := signer.Sign(internaljwt.SignInput{
+				Audience:      "skillhub",
+				TenantID:      "tenant-a",
+				PrincipalType: "user",
+				PrincipalID:   uuid.NewString(),
+				Handle:        "jwt-user",
+				Roles:         tt.roles,
+				Scopes:        tt.scopes,
+			})
+			if err != nil {
+				t.Fatalf("sign: %v", err)
+			}
+			req, _ := http.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set(internaljwt.HeaderInternalAuthorization, "Bearer "+token)
+			user, _, _, err := idp.Identify(req.Context(), req)
+			if err != nil {
+				t.Fatalf("Identify: %v", err)
+			}
+			if user == nil || user.Role != tt.wantRole {
+				t.Fatalf("user role = %#v, want %q", user, tt.wantRole)
+			}
+		})
+	}
+}
+
 func TestSynapseJWTIdentityProviderIdentifyUpsertsUser(t *testing.T) {
 	const secret = "0123456789abcdef0123456789abcdef"
 	principalID := uuid.New()

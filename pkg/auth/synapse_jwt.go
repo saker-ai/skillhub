@@ -87,9 +87,19 @@ func userFromPrincipal(principal *internaljwt.Principal) *model.User {
 	role := "user"
 	for _, r := range principal.Roles {
 		switch r {
-		case internaljwt.RoleAdmin:
+		case internaljwt.RoleAdmin, "platform.owner", "platform.admin", "tenant.owner", "tenant.admin":
 			role = internaljwt.RoleAdmin
-		case internaljwt.RoleModerator:
+		case internaljwt.RoleModerator, "tenant.operator", "app.skillhub.publisher":
+			if role != internaljwt.RoleAdmin {
+				role = internaljwt.RoleModerator
+			}
+		}
+	}
+	for _, scope := range principal.Scopes {
+		switch scope {
+		case internaljwt.ScopeSkillHubAdmin:
+			role = internaljwt.RoleAdmin
+		case internaljwt.ScopeSkillHubPublish, internaljwt.ScopeSkillHubWrite:
 			if role != internaljwt.RoleAdmin {
 				role = internaljwt.RoleModerator
 			}
