@@ -7,6 +7,6 @@ export default function SharedSkills() {
   if (!route) {
     return <p className="muted">Shared SkillHub route is not configured.</p>
   }
-  const host = createStandaloneHost({ appId: 'skillhub', apiBaseUrl: '/api', proxyHref: '/skills' })
+  const host = createStandaloneHost({ appId: 'skillhub', apiBaseUrl: '/api/v1', proxyHref: '/skills' })
   return <NativeAppPage host={host} route={route} />
 }
