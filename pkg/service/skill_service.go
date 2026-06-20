@@ -262,7 +262,7 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 			return nil, nil, fmt.Errorf("check namespace membership: %w", err)
 		}
 		if !can && !user.IsAdmin() {
-			return nil, nil, fmt.Errorf("not a member of namespace '%s'", req.NamespaceSlug)
+			return nil, nil, fmt.Errorf("%w: not a member of namespace '%s'", ErrForbidden, req.NamespaceSlug)
 		}
 		resolvedNS = ns
 	} else {
