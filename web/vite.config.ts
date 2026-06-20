@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
 
+const proxyTarget = process.env.SKILLHUB_WEB_PROXY_TARGET || 'http://localhost:10070'
+
 export default defineConfig({
   plugins: [react()],
   base: process.env.VITE_BASE_PATH || '/',
@@ -22,11 +24,11 @@ export default defineConfig({
       allow: ['.', '../../web-shared'],
     },
     proxy: {
-      '/api': 'http://localhost:10070',
-      '/login': 'http://localhost:10070',
-      '/logout': 'http://localhost:10070',
-      '/.well-known': 'http://localhost:10070',
-      '/healthz': 'http://localhost:10070',
+      '/api': proxyTarget,
+      '/login': proxyTarget,
+      '/logout': proxyTarget,
+      '/.well-known': proxyTarget,
+      '/healthz': proxyTarget,
     },
   },
 })
