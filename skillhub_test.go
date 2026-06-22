@@ -1152,7 +1152,7 @@ func (h *hybridIDP) Identify(ctx context.Context, r *http.Request) (*model.User,
 //     ultimately calls userRepo.GetByID(t.UserID).
 //  3. Bootstrap via X-Test-User: alice creates "acme" + "bystander" namespaces,
 //     and mints a publish-scope team token bound to "acme". Capture raw token.
-//  4. Positive case: POST /api/v1/skills with namespace=acme + the raw bearer
+//  4. Positive case: POST /api/agent/skills with namespace=acme + the raw bearer
 //     → 200 OK; verify the resulting skill has NamespaceID == acme.ID.
 //  5. Negative case: same raw bearer + namespace=bystander → 400 with the
 //     "team token can only publish to its bound namespace" error from
@@ -1281,7 +1281,7 @@ func TestHub_TeamToken_PublishSkillE2E(t *testing.T) {
 		_, _ = fw.Write([]byte("---\nname: e2e\n---\n# E2E\n"))
 		_ = mw.Close()
 
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/skills", &buf)
+		req := httptest.NewRequest(http.MethodPost, "/api/agent/skills", &buf)
 		req.Header.Set("Content-Type", mw.FormDataContentType())
 		req.Header.Set("Authorization", "Bearer "+bearer)
 		w := httptest.NewRecorder()

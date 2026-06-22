@@ -127,7 +127,7 @@ curl -s "$REGISTRY/api/v1/resolve?fingerprint=HEX" | jq .
 Upload a skill using multipart form. `slug` and `version` are required (semver); `slug` is **not** auto-inferred from SKILL.md. Requires authentication.
 
 ```bash
-curl -s -X POST "$REGISTRY/api/v1/skills" \
+curl -s -X POST "$REGISTRY/api/agent/skills" \
   -H "Authorization: Bearer $SKILLHUB_TOKEN" \
   -F "slug=my-skill" \
   -F "version=1.0.0" \

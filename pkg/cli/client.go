@@ -169,7 +169,7 @@ func (c *Client) Download(ref, version string) (io.ReadCloser, error) {
 	return resp.Body, nil
 }
 
-// Publish calls POST /api/v1/skills with multipart form
+// Publish calls POST /api/agent/skills with multipart form.
 func (c *Client) Publish(slug, version, summary, tags, changelog, category string, files map[string][]byte) (map[string]interface{}, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
@@ -207,7 +207,7 @@ func (c *Client) Publish(slug, version, summary, tags, changelog, category strin
 		return nil, fmt.Errorf("closing multipart writer: %w", err)
 	}
 
-	resp, err := c.do("POST", "/api/v1/skills", &buf, writer.FormDataContentType())
+	resp, err := c.do("POST", "/api/agent/skills", &buf, writer.FormDataContentType())
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}

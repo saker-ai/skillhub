@@ -310,7 +310,7 @@ skills_dir: ~/.skillhub/skills   # 技能安装目录（可选）
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `GET` | `/api/v1/whoami` | 当前用户信息 |
-| `POST` | `/api/v1/skills` | 发布技能 |
+| `POST` | `/api/agent/skills` | 发布技能 |
 | `DELETE` | `/api/v1/skills/:slug` | 软删除技能 |
 | `POST` | `/api/v1/skills/:slug/undelete` | 恢复已删除技能 |
 | `POST` | `/api/v1/plugins` | 发布插件 |

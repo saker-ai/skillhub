@@ -31,6 +31,7 @@ import (
 //	GET  /healthz, /readyz                        liveness / readiness
 //	GET  /api/v1/...                              public + download + authed + admin
 //	GET  /api/runtime/...                         Runtime skill loading API
+//	POST /api/agent/skills                        Agent skill publish API
 //	POST /api/v1/agent/provision                  agent auto-provision
 //	POST /api/v1/webhooks/{github,gitlab,gitea}   import webhooks
 //
@@ -243,6 +244,16 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		authed.POST("/plugins/@:namespace/:slug/undelete", s.h.plugin.Undelete)
 		authed.POST("/plugins/@:namespace/:slug/versions/:version/yank", s.h.plugin.YankVersion)
 		authed.DELETE("/plugins/@:namespace/:slug/versions/:version/yank", s.h.plugin.UnyankVersion)
+	}
+
+	// Agent Skill API. Saker publishes learned/user-authored skills here.
+	// The legacy POST /api/v1/skills route remains above for compatibility.
+	agentSkills := r.Group("/api/agent")
+	agentSkills.Use(middleware.RequireAuth(s.idp))
+	agentSkills.Use(middleware.RequireScope())
+	agentSkills.Use(s.rateLimiter.RateLimit("write"))
+	{
+		agentSkills.POST("/skills", s.h.skill.Publish)
 	}
 
 	// Admin endpoints

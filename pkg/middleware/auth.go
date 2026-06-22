@@ -125,7 +125,7 @@ func RequireScope(allowedScopes ...string) gin.HandlerFunc {
 				}
 				// Restrict POST to skill publish/star routes only
 				path := c.FullPath()
-				if path != "/api/v1/skills" && path != "/api/v1/stars/:slug" {
+				if path != "/api/v1/skills" && path != "/api/agent/skills" && path != "/api/v1/stars/:slug" {
 					c.JSON(http.StatusForbidden, gin.H{"error": "token scope 'publish' only allows publishing skills"})
 					c.Abort()
 					return

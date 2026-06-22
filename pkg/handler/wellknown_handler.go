@@ -27,7 +27,7 @@ func (h *WellKnownHandler) ClawHubJSON(c *gin.Context) {
 			"download":     "/api/v1/download",
 			"resolve":      "/api/v1/resolve",
 			"whoami":       "/api/v1/whoami",
-			"publish":      "/api/v1/skills",
+			"publish":      "/api/agent/skills",
 			"installGuide": "/skills.md",
 			"openapi":      "/openapi.json",
 			"apiDocs":      "/docs",
@@ -80,7 +80,7 @@ func renderInstallMarkdown(base string) string {
 	b.WriteString("It is designed to be read by an AI agent: every section contains a runnable command and ")
 	b.WriteString("the shape of the expected response. Follow it top-to-bottom for first-time setup.\n\n")
 	b.WriteString("- **Base URL**: `" + base + "`\n")
-	b.WriteString("- **API version**: `v1` (all JSON endpoints live under `/api/v1`)\n")
+	b.WriteString("- **API version**: `v1` for registry reads; skill publish uses `/api/agent/skills`\n")
 	b.WriteString("- **Auth model**: bearer token in `Authorization: Bearer <token>` header\n")
 	b.WriteString("- **Token acquisition**: device-flow (no browser required on the agent host)\n\n")
 
@@ -178,7 +178,7 @@ func renderInstallMarkdown(base string) string {
 	b.WriteString("```\n\n")
 
 	b.WriteString("## 5. Publish a new skill version\n\n")
-	b.WriteString("`POST /api/v1/skills` is `multipart/form-data`. Required fields: `slug`, `version` (semver), and at least one file (`SKILL.md` is mandatory inside the upload).\n\n")
+	b.WriteString("`POST /api/agent/skills` is `multipart/form-data`. Required fields: `slug`, `version` (semver), and at least one file (`SKILL.md` is mandatory inside the upload).\n\n")
 	b.WriteString("Optional fields: `displayName`, `summary`, `category`, `tags` (comma-separated), `kind`, `visibility` (`public|private`), `namespace` (defaults to your personal namespace if omitted), `changelog`, `dependencies` (JSON array of `{slug,versionRange}`), `signature` (cosign bundle, ≤ 64 KB).\n\n")
 	b.WriteString("```bash\n")
 	b.WriteString("curl -fsS -X POST -H \"Authorization: Bearer $SKILLHUB_TOKEN\" \\\n")
@@ -190,7 +190,7 @@ func renderInstallMarkdown(base string) string {
 	b.WriteString("  -F 'changelog=Initial release' \\\n")
 	b.WriteString("  -F 'files=@./SKILL.md' \\\n")
 	b.WriteString("  -F 'files=@./script.sh' \\\n")
-	b.WriteString("  " + base + "/api/v1/skills\n")
+	b.WriteString("  " + base + "/api/agent/skills\n")
 	b.WriteString("# {\"skill\": {...}, \"version\": {...}}\n")
 	b.WriteString("```\n\n")
 	b.WriteString("After publishing, search the index until the new version appears (Bleve indexing is asynchronous — typically <1 s).\n\n")

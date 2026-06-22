@@ -150,25 +150,7 @@ paths:
                     items: { type: string }
                     example: [devops, security, data, frontend, backend, infra, testing, ai, general]
 
-  /api/v1/skills:
-    get:
-      tags: [Skills]
-      summary: List skills (paginated)
-      parameters:
-        - { name: cursor,   in: query, schema: { type: string },  description: "Opaque cursor from previous nextCursor" }
-        - { name: sort,     in: query, schema: { type: string, enum: [created, downloads, stars, updated], default: created } }
-        - { name: limit,    in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
-        - { name: category, in: query, schema: { type: string } }
-      responses:
-        "200":
-          description: Paginated skill list
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:       { type: array, items: { $ref: "#/components/schemas/Skill" } }
-                  nextCursor: { type: string, nullable: true }
+  /api/agent/skills:
     post:
       tags: [Skills]
       summary: Publish a new skill version (multipart)
@@ -212,6 +194,26 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/skills:
+    get:
+      tags: [Skills]
+      summary: List skills (paginated)
+      parameters:
+        - { name: cursor,   in: query, schema: { type: string },  description: "Opaque cursor from previous nextCursor" }
+        - { name: sort,     in: query, schema: { type: string, enum: [created, downloads, stars, updated], default: created } }
+        - { name: limit,    in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: category, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Paginated skill list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:       { type: array, items: { $ref: "#/components/schemas/Skill" } }
+                  nextCursor: { type: string, nullable: true }
 
   /api/v1/skills/{slug}:
     parameters:

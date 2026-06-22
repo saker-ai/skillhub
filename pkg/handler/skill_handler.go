@@ -115,7 +115,7 @@ func (h *SkillHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, skill)
 }
 
-// Publish handles POST /api/v1/skills
+// Publish handles POST /api/agent/skills and the legacy POST /api/v1/skills.
 func (h *SkillHandler) Publish(c *gin.Context) {
 	user := middleware.GetUser(c)
 	if user == nil {

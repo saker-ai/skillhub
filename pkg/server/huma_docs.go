@@ -252,7 +252,7 @@ func registerOpenAPIDocs(api huma.API) {
 	registerDoc(doc, http.MethodGet, "/api/v1/search", "search", "skills", "Search skills", public, (*docSearchInput)(nil), (*docMapOutput)(nil))
 	registerDoc(doc, http.MethodGet, "/api/v1/categories", "categories", "skills", "List skill categories", public, (*struct{})(nil), (*docMapOutput)(nil))
 	registerDoc(doc, http.MethodGet, "/api/v1/skills", "skills-list", "skills", "List skills", public, (*docListInput)(nil), (*docSkillListOutput)(nil))
-	registerDoc(doc, http.MethodPost, "/api/v1/skills", "skills-publish", "skills", "Publish skill", security, (*docSkillPublishInput)(nil), (*docSkillOutput)(nil))
+	registerDoc(doc, http.MethodPost, "/api/agent/skills", "agent-skills-publish", "skills", "Publish skill", security, (*docSkillPublishInput)(nil), (*docSkillOutput)(nil))
 	registerDoc(doc, http.MethodGet, "/api/v1/skills/{slug}", "skills-get", "skills", "Get skill", public, (*docSlugInput)(nil), (*docSkillOutput)(nil))
 	registerDoc(doc, http.MethodDelete, "/api/v1/skills/{slug}", "skills-delete", "skills", "Delete skill", security, (*docSlugInput)(nil), (*docOKOutput)(nil))
 	registerDoc(doc, http.MethodPost, "/api/v1/skills/{slug}/undelete", "skills-undelete", "skills", "Restore deleted skill", security, (*docSlugInput)(nil), (*docOKOutput)(nil))

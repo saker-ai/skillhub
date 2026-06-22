@@ -333,7 +333,7 @@ skills_dir: ~/.skillhub/skills   # Skill install directory (optional)
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/v1/whoami` | Current user info |
-| `POST` | `/api/v1/skills` | Publish a skill |
+| `POST` | `/api/agent/skills` | Publish a skill |
 | `DELETE` | `/api/v1/skills/:slug` | Soft-delete a skill |
 | `POST` | `/api/v1/skills/:slug/undelete` | Restore a deleted skill |
 | `POST` | `/api/v1/plugins` | Publish a plugin |
