@@ -181,6 +181,96 @@ func (h *SkillHandler) Publish(c *gin.Context) {
 	})
 }
 
+// DirectUploadPlan handles POST /api/v1/skills/direct-upload.
+func (h *SkillHandler) DirectUploadPlan(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	var req struct {
+		Slug      string                            `json:"slug"`
+		Version   string                            `json:"version"`
+		Namespace string                            `json:"namespace"`
+		Files     []service.DirectUploadFileRequest `json:"files"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	plan, err := h.svc.CreateDirectUploadPlan(c.Request.Context(), user, service.DirectUploadPlanRequest{
+		Slug:           req.Slug,
+		Version:        req.Version,
+		NamespaceSlug:  req.Namespace,
+		Files:          req.Files,
+		TokenNamespace: middleware.GetTokenNamespace(c),
+	})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, plan)
+}
+
+// DirectUploadComplete handles POST /api/v1/skills/direct-upload/complete.
+func (h *SkillHandler) DirectUploadComplete(c *gin.Context) {
+	user := middleware.GetUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+	var req struct {
+		Slug         string                             `json:"slug"`
+		Version      string                             `json:"version"`
+		Namespace    string                             `json:"namespace"`
+		Changelog    string                             `json:"changelog"`
+		DisplayName  string                             `json:"displayName"`
+		Summary      string                             `json:"summary"`
+		Category     string                             `json:"category"`
+		Kind         string                             `json:"kind"`
+		Visibility   string                             `json:"visibility"`
+		Tags         []string                           `json:"tags"`
+		Files        []service.DirectUploadCompleteFile `json:"files"`
+		Dependencies []model.SkillDependency            `json:"dependencies"`
+		Signature    string                             `json:"signature"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if len(req.Signature) > 64*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "signature bundle exceeds 64 KB"})
+		return
+	}
+	completeReq := service.DirectUploadCompleteRequest{
+		Slug:           req.Slug,
+		Version:        req.Version,
+		Changelog:      req.Changelog,
+		DisplayName:    req.DisplayName,
+		Summary:        req.Summary,
+		Category:       req.Category,
+		Kind:           req.Kind,
+		Visibility:     req.Visibility,
+		Tags:           req.Tags,
+		NamespaceSlug:  req.Namespace,
+		Files:          req.Files,
+		Dependencies:   req.Dependencies,
+		TokenNamespace: middleware.GetTokenNamespace(c),
+	}
+	if req.Signature != "" {
+		completeReq.SignatureBundle = []byte(req.Signature)
+	}
+	skill, version, err := h.svc.CompleteDirectUpload(c.Request.Context(), user, completeReq)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"skill":   skill,
+		"version": version,
+	})
+}
+
 // Delete handles DELETE /api/v1/skills/:slug
 func (h *SkillHandler) Delete(c *gin.Context) {
 	user := middleware.GetUser(c)

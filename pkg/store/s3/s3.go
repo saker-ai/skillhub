@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -50,9 +51,10 @@ type Config = config.StoreS3Config
 
 // Backend implements store.Store using AWS S3 (or S3-compatible) storage.
 type Backend struct {
-	client *s3.Client
-	bucket string
-	prefix string
+	client  *s3.Client
+	presign *s3.PresignClient
+	bucket  string
+	prefix  string
 }
 
 // New 是直接构造入口（不经过 driver registry）。
@@ -91,9 +93,10 @@ func New(cfg Config) (*Backend, error) {
 	}
 
 	return &Backend{
-		client: client,
-		bucket: cfg.Bucket,
-		prefix: prefix,
+		client:  client,
+		presign: s3.NewPresignClient(client),
+		bucket:  cfg.Bucket,
+		prefix:  prefix,
 	}, nil
 }
 
@@ -106,6 +109,12 @@ func (b *Backend) key(owner, slug, version, filePath string) string {
 // metaKey returns the metadata object key for a version.
 func (b *Backend) metaKey(owner, slug, version string) string {
 	return fmt.Sprintf("%s/%s/%s/versions/%s/meta.json", b.prefix, owner, slug, version)
+}
+
+func (b *Backend) Provider() string { return "s3" }
+
+func (b *Backend) ObjectKey(owner, slug, version, filePath string) string {
+	return b.key(owner, slug, version, filePath)
 }
 
 // versionPrefix returns the prefix for listing all versions of a skill.
@@ -127,7 +136,10 @@ func (b *Backend) Publish(ctx context.Context, opts store.PublishOpts) (string, 
 		}
 	}
 
-	// Write version metadata
+	return b.PutMeta(ctx, opts)
+}
+
+func (b *Backend) PutMeta(ctx context.Context, opts store.PublishOpts) (string, error) {
 	meta := store.PublishMeta{
 		Version:   opts.Version,
 		Author:    opts.Author,
@@ -148,6 +160,147 @@ func (b *Backend) Publish(ctx context.Context, opts store.PublishOpts) (string, 
 	}
 
 	return fmt.Sprintf("s3://%s/%s", b.bucket, metaKey), nil
+}
+
+func (b *Backend) PresignPut(ctx context.Context, owner, slug, version, filePath, contentType string, expires time.Duration) (*store.DirectObjectURL, error) {
+	key := b.key(owner, slug, version, filePath)
+	input := &s3.PutObjectInput{
+		Bucket: &b.bucket,
+		Key:    &key,
+	}
+	if contentType != "" {
+		input.ContentType = &contentType
+	}
+	out, err := b.presign.PresignPutObject(ctx, input, func(o *s3.PresignOptions) {
+		o.Expires = expires
+	})
+	if err != nil {
+		return nil, fmt.Errorf("presign put object: %w", err)
+	}
+	return &store.DirectObjectURL{
+		Provider:  b.Provider(),
+		Bucket:    b.bucket,
+		Key:       key,
+		Method:    out.Method,
+		URL:       out.URL,
+		Headers:   headerMap(out.SignedHeader),
+		ExpiresAt: time.Now().Add(expires),
+	}, nil
+}
+
+func (b *Backend) PresignGet(ctx context.Context, owner, slug, version, filePath string, expires time.Duration) (*store.DirectObjectURL, error) {
+	key := b.key(owner, slug, version, filePath)
+	out, err := b.presign.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: &b.bucket,
+		Key:    &key,
+	}, func(o *s3.PresignOptions) {
+		o.Expires = expires
+	})
+	if err != nil {
+		return nil, fmt.Errorf("presign get object: %w", err)
+	}
+	return &store.DirectObjectURL{
+		Provider:  b.Provider(),
+		Bucket:    b.bucket,
+		Key:       key,
+		Method:    out.Method,
+		URL:       out.URL,
+		Headers:   headerMap(out.SignedHeader),
+		ExpiresAt: time.Now().Add(expires),
+	}, nil
+}
+
+func (b *Backend) CreateMultipartUpload(ctx context.Context, owner, slug, version, filePath, contentType string, size, partSize int64, expires time.Duration) (*store.MultipartObjectUpload, error) {
+	key := b.key(owner, slug, version, filePath)
+	input := &s3.CreateMultipartUploadInput{
+		Bucket: &b.bucket,
+		Key:    &key,
+	}
+	if contentType != "" {
+		input.ContentType = &contentType
+	}
+	created, err := b.client.CreateMultipartUpload(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("create multipart upload: %w", err)
+	}
+	uploadID := aws.ToString(created.UploadId)
+	parts, err := b.presignMultipartParts(ctx, key, uploadID, size, partSize, expires)
+	if err != nil {
+		_ = b.AbortMultipartUpload(ctx, owner, slug, version, filePath, uploadID)
+		return nil, err
+	}
+	return &store.MultipartObjectUpload{UploadID: uploadID, PartSize: partSize, Parts: parts}, nil
+}
+
+func (b *Backend) presignMultipartParts(ctx context.Context, key, uploadID string, size, partSize int64, expires time.Duration) ([]store.DirectObjectPart, error) {
+	if partSize <= 0 {
+		return nil, fmt.Errorf("invalid multipart part size")
+	}
+	partCount := int((size + partSize - 1) / partSize)
+	parts := make([]store.DirectObjectPart, 0, partCount)
+	for i := 0; i < partCount; i++ {
+		partNumber := int32(i + 1)
+		offset := int64(i) * partSize
+		partBytes := partSize
+		if remaining := size - offset; remaining < partBytes {
+			partBytes = remaining
+		}
+		out, err := b.presign.PresignUploadPart(ctx, &s3.UploadPartInput{
+			Bucket:     &b.bucket,
+			Key:        &key,
+			UploadId:   &uploadID,
+			PartNumber: &partNumber,
+		}, func(o *s3.PresignOptions) {
+			o.Expires = expires
+		})
+		if err != nil {
+			return nil, fmt.Errorf("presign upload part %d: %w", i+1, err)
+		}
+		parts = append(parts, store.DirectObjectPart{
+			PartNumber: i + 1,
+			Method:     out.Method,
+			URL:        out.URL,
+			Headers:    headerMap(out.SignedHeader),
+			Offset:     offset,
+			Size:       partBytes,
+		})
+	}
+	return parts, nil
+}
+
+func (b *Backend) CompleteMultipartUpload(ctx context.Context, owner, slug, version, filePath, uploadID string, parts []store.CompletedUploadPart) error {
+	key := b.key(owner, slug, version, filePath)
+	completed := make([]types.CompletedPart, 0, len(parts))
+	for _, part := range parts {
+		partNumber := int32(part.PartNumber)
+		etag := strings.TrimSpace(part.ETag)
+		completed = append(completed, types.CompletedPart{PartNumber: &partNumber, ETag: &etag})
+	}
+	_, err := b.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:   &b.bucket,
+		Key:      &key,
+		UploadId: &uploadID,
+		MultipartUpload: &types.CompletedMultipartUpload{
+			Parts: completed,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("complete multipart upload: %w", err)
+	}
+	return nil
+}
+
+func (b *Backend) AbortMultipartUpload(ctx context.Context, owner, slug, version, filePath, uploadID string) error {
+	key := b.key(owner, slug, version, filePath)
+	_, err := b.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   &b.bucket,
+		Key:      &key,
+		UploadId: &uploadID,
+	})
+	if err != nil {
+		return fmt.Errorf("abort multipart upload: %w", err)
+	}
+	return nil
 }
 
 func (b *Backend) Archive(ctx context.Context, owner, slug, version string) (io.ReadCloser, error) {
@@ -339,6 +492,17 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func headerMap(h http.Header) map[string]string {
+	if len(h) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(h))
+	for k, vals := range h {
+		out[k] = strings.Join(vals, ",")
+	}
+	return out
 }
 
 func (b *Backend) Rename(ctx context.Context, owner, oldSlug, newSlug string) error {

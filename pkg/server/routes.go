@@ -172,6 +172,8 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 	{
 		authed.GET("/whoami", s.h.auth.WhoAmI)
 		authed.POST("/skills", s.h.skill.Publish)
+		authed.POST("/skills/direct-upload", s.h.skill.DirectUploadPlan)
+		authed.POST("/skills/direct-upload/complete", s.h.skill.DirectUploadComplete)
 		authed.DELETE("/skills/:slug", s.h.skill.Delete)
 		authed.DELETE("/skills/:slug/purge", s.h.skill.Purge)
 		authed.POST("/skills/:slug/undelete", s.h.skill.Undelete)

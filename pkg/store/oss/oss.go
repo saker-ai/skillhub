@@ -89,6 +89,12 @@ func (b *Backend) metaKey(owner, slug, version string) string {
 	return fmt.Sprintf("%s/%s/%s/versions/%s/meta.json", b.prefix, owner, slug, version)
 }
 
+func (b *Backend) Provider() string { return "oss" }
+
+func (b *Backend) ObjectKey(owner, slug, version, filePath string) string {
+	return b.key(owner, slug, version, filePath)
+}
+
 func (b *Backend) versionPrefix(owner, slug string) string {
 	return fmt.Sprintf("%s/%s/%s/versions/", b.prefix, owner, slug)
 }
@@ -107,7 +113,10 @@ func (b *Backend) Publish(ctx context.Context, opts store.PublishOpts) (string, 
 		}
 	}
 
-	// Write version metadata
+	return b.PutMeta(ctx, opts)
+}
+
+func (b *Backend) PutMeta(ctx context.Context, opts store.PublishOpts) (string, error) {
 	meta := store.PublishMeta{
 		Version:   opts.Version,
 		Author:    opts.Author,
@@ -128,6 +137,141 @@ func (b *Backend) Publish(ctx context.Context, opts store.PublishOpts) (string, 
 	}
 
 	return fmt.Sprintf("oss://%s/%s", b.bucket, metaKey), nil
+}
+
+func (b *Backend) PresignPut(ctx context.Context, owner, slug, version, filePath, contentType string, expires time.Duration) (*store.DirectObjectURL, error) {
+	key := b.key(owner, slug, version, filePath)
+	input := &oss.PutObjectRequest{
+		Bucket: &b.bucket,
+		Key:    &key,
+	}
+	if contentType != "" {
+		input.ContentType = &contentType
+	}
+	out, err := b.client.Presign(ctx, input, oss.PresignExpires(expires))
+	if err != nil {
+		return nil, fmt.Errorf("presign put object: %w", err)
+	}
+	return &store.DirectObjectURL{
+		Provider:  b.Provider(),
+		Bucket:    b.bucket,
+		Key:       key,
+		Method:    out.Method,
+		URL:       out.URL,
+		Headers:   out.SignedHeaders,
+		ExpiresAt: out.Expiration,
+	}, nil
+}
+
+func (b *Backend) PresignGet(ctx context.Context, owner, slug, version, filePath string, expires time.Duration) (*store.DirectObjectURL, error) {
+	key := b.key(owner, slug, version, filePath)
+	out, err := b.client.Presign(ctx, &oss.GetObjectRequest{
+		Bucket: &b.bucket,
+		Key:    &key,
+	}, oss.PresignExpires(expires))
+	if err != nil {
+		return nil, fmt.Errorf("presign get object: %w", err)
+	}
+	return &store.DirectObjectURL{
+		Provider:  b.Provider(),
+		Bucket:    b.bucket,
+		Key:       key,
+		Method:    out.Method,
+		URL:       out.URL,
+		Headers:   out.SignedHeaders,
+		ExpiresAt: out.Expiration,
+	}, nil
+}
+
+func (b *Backend) CreateMultipartUpload(ctx context.Context, owner, slug, version, filePath, contentType string, size, partSize int64, expires time.Duration) (*store.MultipartObjectUpload, error) {
+	key := b.key(owner, slug, version, filePath)
+	input := &oss.InitiateMultipartUploadRequest{
+		Bucket: &b.bucket,
+		Key:    &key,
+	}
+	if contentType != "" {
+		input.ContentType = &contentType
+	}
+	created, err := b.client.InitiateMultipartUpload(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("initiate multipart upload: %w", err)
+	}
+	uploadID := strings.TrimSpace(oss.ToString(created.UploadId))
+	parts, err := b.presignMultipartParts(ctx, key, uploadID, size, partSize, expires)
+	if err != nil {
+		_ = b.AbortMultipartUpload(ctx, owner, slug, version, filePath, uploadID)
+		return nil, err
+	}
+	return &store.MultipartObjectUpload{UploadID: uploadID, PartSize: partSize, Parts: parts}, nil
+}
+
+func (b *Backend) presignMultipartParts(ctx context.Context, key, uploadID string, size, partSize int64, expires time.Duration) ([]store.DirectObjectPart, error) {
+	if partSize <= 0 {
+		return nil, fmt.Errorf("invalid multipart part size")
+	}
+	partCount := int((size + partSize - 1) / partSize)
+	parts := make([]store.DirectObjectPart, 0, partCount)
+	for i := 0; i < partCount; i++ {
+		partNumber := int32(i + 1)
+		offset := int64(i) * partSize
+		partBytes := partSize
+		if remaining := size - offset; remaining < partBytes {
+			partBytes = remaining
+		}
+		out, err := b.client.Presign(ctx, &oss.UploadPartRequest{
+			Bucket:        &b.bucket,
+			Key:           &key,
+			UploadId:      &uploadID,
+			PartNumber:    partNumber,
+			ContentLength: &partBytes,
+		}, oss.PresignExpires(expires))
+		if err != nil {
+			return nil, fmt.Errorf("presign upload part %d: %w", i+1, err)
+		}
+		parts = append(parts, store.DirectObjectPart{
+			PartNumber: i + 1,
+			Method:     out.Method,
+			URL:        out.URL,
+			Headers:    out.SignedHeaders,
+			Offset:     offset,
+			Size:       partBytes,
+		})
+	}
+	return parts, nil
+}
+
+func (b *Backend) CompleteMultipartUpload(ctx context.Context, owner, slug, version, filePath, uploadID string, parts []store.CompletedUploadPart) error {
+	key := b.key(owner, slug, version, filePath)
+	completed := make([]oss.UploadPart, 0, len(parts))
+	for _, part := range parts {
+		etag := strings.TrimSpace(part.ETag)
+		completed = append(completed, oss.UploadPart{PartNumber: int32(part.PartNumber), ETag: &etag})
+	}
+	_, err := b.client.CompleteMultipartUpload(ctx, &oss.CompleteMultipartUploadRequest{
+		Bucket:   &b.bucket,
+		Key:      &key,
+		UploadId: &uploadID,
+		CompleteMultipartUpload: &oss.CompleteMultipartUpload{
+			Parts: completed,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("complete multipart upload: %w", err)
+	}
+	return nil
+}
+
+func (b *Backend) AbortMultipartUpload(ctx context.Context, owner, slug, version, filePath, uploadID string) error {
+	key := b.key(owner, slug, version, filePath)
+	_, err := b.client.AbortMultipartUpload(ctx, &oss.AbortMultipartUploadRequest{
+		Bucket:   &b.bucket,
+		Key:      &key,
+		UploadId: &uploadID,
+	})
+	if err != nil {
+		return fmt.Errorf("abort multipart upload: %w", err)
+	}
+	return nil
 }
 
 func (b *Backend) Archive(ctx context.Context, owner, slug, version string) (io.ReadCloser, error) {

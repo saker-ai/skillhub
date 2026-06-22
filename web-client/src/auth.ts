@@ -1,4 +1,10 @@
-import { skillHubURL } from '../basePath';
+import { appBasePath, appURL } from '@saker/web-shared/base-path';
+
+function skillHubURL(path: string): string {
+  return appURL(appBasePath(import.meta.env.BASE_URL), path);
+}
+
+const WHOAMI_PATH = '/api/v1/whoami';
 
 export interface User {
   id: string;
@@ -8,7 +14,7 @@ export interface User {
 
 export async function whoami(): Promise<User | null> {
   try {
-    const res = await fetch(skillHubURL('/api/v1/whoami'), { credentials: 'same-origin' });
+    const res = await fetch(skillHubURL(WHOAMI_PATH), { credentials: 'same-origin' });
     if (!res.ok) return null;
     return res.json();
   } catch {

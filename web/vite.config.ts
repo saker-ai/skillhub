@@ -9,6 +9,8 @@ export default defineConfig({
   base: process.env.VITE_BASE_PATH || '/',
   resolve: {
     alias: {
+      '@saker/web-shared': path.resolve(__dirname, '../../web-shared/src'),
+      '@saker/skillhub-client': path.resolve(__dirname, '../web-client/src'),
       react: path.resolve(__dirname, 'node_modules/react'),
       'react/jsx-runtime': path.resolve(__dirname, 'node_modules/react/jsx-runtime'),
       'lucide-react': path.resolve(__dirname, 'node_modules/lucide-react')
@@ -21,7 +23,7 @@ export default defineConfig({
   },
   server: {
     fs: {
-      allow: ['.', '../../web-shared'],
+      allow: ['.', '../../web-shared', '../web-client'],
     },
     proxy: {
       '/api': proxyTarget,

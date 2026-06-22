@@ -37,6 +37,53 @@ type Store interface {
 	DeleteVersion(ctx context.Context, owner, slug, version string) error
 }
 
+// DirectObjectStore is an optional extension implemented by object-store
+// backends that can safely hand callers short-lived signed URLs.
+type DirectObjectStore interface {
+	Provider() string
+	ObjectKey(owner, slug, version, filePath string) string
+	PresignPut(ctx context.Context, owner, slug, version, filePath, contentType string, expires time.Duration) (*DirectObjectURL, error)
+	PresignGet(ctx context.Context, owner, slug, version, filePath string, expires time.Duration) (*DirectObjectURL, error)
+	PutMeta(ctx context.Context, opts PublishOpts) (string, error)
+}
+
+type MultipartObjectStore interface {
+	DirectObjectStore
+	CreateMultipartUpload(ctx context.Context, owner, slug, version, filePath, contentType string, size, partSize int64, expires time.Duration) (*MultipartObjectUpload, error)
+	CompleteMultipartUpload(ctx context.Context, owner, slug, version, filePath, uploadID string, parts []CompletedUploadPart) error
+	AbortMultipartUpload(ctx context.Context, owner, slug, version, filePath, uploadID string) error
+}
+
+type DirectObjectURL struct {
+	Provider  string            `json:"provider"`
+	Bucket    string            `json:"bucket"`
+	Key       string            `json:"key"`
+	Method    string            `json:"method"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	ExpiresAt time.Time         `json:"expiresAt"`
+}
+
+type MultipartObjectUpload struct {
+	UploadID string             `json:"upload_id"`
+	PartSize int64              `json:"part_size"`
+	Parts    []DirectObjectPart `json:"parts"`
+}
+
+type DirectObjectPart struct {
+	PartNumber int               `json:"part_number"`
+	Method     string            `json:"method"`
+	URL        string            `json:"url"`
+	Headers    map[string]string `json:"headers,omitempty"`
+	Offset     int64             `json:"offset"`
+	Size       int64             `json:"size"`
+}
+
+type CompletedUploadPart struct {
+	PartNumber int    `json:"part_number"`
+	ETag       string `json:"etag,omitempty"`
+}
+
 // ValidatePathComponent checks that a single path component (owner, slug, version)
 // does not contain traversal sequences or separators. Returns false for unsafe values.
 func ValidatePathComponent(s string) bool {

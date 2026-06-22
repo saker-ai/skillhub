@@ -1,6 +1,10 @@
-import { skillHubURL } from '../basePath';
+import { appBasePath, appURL } from '@saker/web-shared/base-path';
 
-const BASE = skillHubURL('/api/v1');
+function skillHubURL(path: string): string {
+  return appURL(appBasePath(import.meta.env.BASE_URL), path);
+}
+
+const BASE = () => skillHubURL('/api/v1');
 
 export class ApiError extends Error {
   status: number;
@@ -18,7 +22,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (!(init?.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
   }
-  const res = await fetch(BASE + path, {
+  const res = await fetch(BASE() + path, {
     credentials: 'same-origin',
     ...init,
     headers: { ...headers, ...init?.headers },
@@ -31,11 +35,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 export async function apiFetchRaw(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(BASE + path, { credentials: 'same-origin', ...init });
+  return fetch(BASE() + path, { credentials: 'same-origin', ...init });
 }
 
 export function apiURL(path: string): string {
-  return BASE + path;
+  return BASE() + path;
 }
 
 export function apiUploadWithProgress<T>(

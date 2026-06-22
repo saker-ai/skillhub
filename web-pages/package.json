@@ -1,0 +1,37 @@
+{
+  "name": "@saker/skillhub-pages",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SkillHub business pages shared across webhub-native and standalone adapters",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./auth": "./src/hooks/useAuth.ts",
+    "./utils/display-name": "./src/utils/displayName.ts",
+    "./home": "./src/pages/Home.tsx",
+    "./login": "./src/pages/Login.tsx",
+    "./namespace-detail": "./src/pages/NamespaceDetail.tsx",
+    "./namespaces": "./src/pages/Namespaces.tsx",
+    "./plugin-detail": "./src/pages/PluginDetail.tsx",
+    "./plugins": "./src/pages/Plugins.tsx",
+    "./publish": "./src/pages/Publish.tsx",
+    "./search": "./src/pages/Search.tsx",
+    "./skill-detail": "./src/pages/SkillDetail.tsx",
+    "./skills": "./src/pages/Skills.tsx"
+  },
+  "dependencies": {
+    "@saker/skillhub-client": "workspace:*",
+    "@saker/web-shared": "workspace:*",
+    "dompurify": "^3.4.0",
+    "marked": "^18.0.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-i18next": "^17.0.0",
+    "react-router-dom": "^7.14.0"
+  }
+}

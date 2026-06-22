@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -17,6 +21,7 @@ import (
 	"github.com/saker-ai/skillhub/pkg/model"
 	"github.com/saker-ai/skillhub/pkg/repository"
 	"github.com/saker-ai/skillhub/pkg/search"
+	"github.com/saker-ai/skillhub/pkg/store"
 	storegit "github.com/saker-ai/skillhub/pkg/store/git"
 )
 
@@ -124,6 +129,75 @@ func (fx *skillFixtures) publishBaseSkill(t *testing.T, slug string, as *model.U
 }
 
 func ptrUUID(u uuid.UUID) *uuid.UUID { return &u }
+
+type fakeDirectStore struct {
+	files        map[string][]byte
+	publishCalls int
+	metaCalls    int
+}
+
+func newFakeDirectStore() *fakeDirectStore {
+	return &fakeDirectStore{files: map[string][]byte{}}
+}
+
+func (f *fakeDirectStore) Publish(_ context.Context, opts store.PublishOpts) (string, error) {
+	f.publishCalls++
+	if f.files == nil {
+		f.files = map[string][]byte{}
+	}
+	for path, content := range opts.Files {
+		f.files[f.ObjectKey(opts.Owner, opts.Slug, opts.Version, path)] = content
+	}
+	return "fake", nil
+}
+func (*fakeDirectStore) Archive(context.Context, string, string, string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+func (f *fakeDirectStore) GetFile(_ context.Context, owner, slug, version, filePath string) ([]byte, error) {
+	data, ok := f.files[f.ObjectKey(owner, slug, version, filePath)]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return data, nil
+}
+func (*fakeDirectStore) ListVersions(context.Context, string, string) ([]string, error) {
+	return nil, nil
+}
+func (*fakeDirectStore) Exists(context.Context, string, string) bool                 { return false }
+func (*fakeDirectStore) Rename(context.Context, string, string, string) error        { return nil }
+func (*fakeDirectStore) Delete(context.Context, string, string) error                { return nil }
+func (*fakeDirectStore) DeleteVersion(context.Context, string, string, string) error { return nil }
+func (*fakeDirectStore) Provider() string                                            { return "oss" }
+func (*fakeDirectStore) ObjectKey(owner, slug, version, filePath string) string {
+	return "skills/" + owner + "/" + slug + "/versions/" + version + "/files/" + store.SanitizeStorePath(filePath)
+}
+func (f *fakeDirectStore) PresignPut(_ context.Context, owner, slug, version, filePath, contentType string, expires time.Duration) (*store.DirectObjectURL, error) {
+	key := f.ObjectKey(owner, slug, version, filePath)
+	return &store.DirectObjectURL{
+		Provider:  f.Provider(),
+		Bucket:    "bucket",
+		Key:       key,
+		Method:    "PUT",
+		URL:       "https://example.test/" + key,
+		Headers:   map[string]string{"Content-Type": contentType},
+		ExpiresAt: time.Now().Add(expires),
+	}, nil
+}
+func (f *fakeDirectStore) PresignGet(_ context.Context, owner, slug, version, filePath string, expires time.Duration) (*store.DirectObjectURL, error) {
+	key := f.ObjectKey(owner, slug, version, filePath)
+	return &store.DirectObjectURL{
+		Provider:  f.Provider(),
+		Bucket:    "bucket",
+		Key:       key,
+		Method:    "GET",
+		URL:       "https://example.test/" + key,
+		ExpiresAt: time.Now().Add(expires),
+	}, nil
+}
+func (f *fakeDirectStore) PutMeta(context.Context, store.PublishOpts) (string, error) {
+	f.metaCalls++
+	return "oss://bucket/meta.json", nil
+}
 
 func (fx *skillFixtures) publishNamespaceSkill(t *testing.T, nsSlug, slug string, memberRole string) *model.SkillWithOwner {
 	t.Helper()
@@ -755,4 +829,167 @@ func TestSkillService_UpdateFile(t *testing.T) {
 			t.Fatal("expected error for nonexistent skill")
 		}
 	})
+}
+
+func TestSkillService_CreateDirectUploadPlan(t *testing.T) {
+	t.Parallel()
+
+	t.Run("rejects non object backend", func(t *testing.T) {
+		t.Parallel()
+		fx := setupSkillFixtures(t)
+		_, err := fx.svc.CreateDirectUploadPlan(context.Background(), fx.owner, DirectUploadPlanRequest{
+			Slug:    "demo",
+			Version: "1.0.0",
+			Files:   []DirectUploadFileRequest{{Path: "SKILL.md"}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "direct upload is only available") {
+			t.Fatalf("CreateDirectUploadPlan error = %v, want object-backend rejection", err)
+		}
+	})
+
+	t.Run("returns signed urls with sanitized paths", func(t *testing.T) {
+		t.Parallel()
+		fx := setupSkillFixtures(t)
+		fx.svc.fileStore = &fakeDirectStore{}
+
+		plan, err := fx.svc.CreateDirectUploadPlan(context.Background(), fx.owner, DirectUploadPlanRequest{
+			Slug:    "demo",
+			Version: "1.0.0",
+			Files: []DirectUploadFileRequest{
+				{Path: "/SKILL.md", ContentType: "text/markdown"},
+				{Path: "refs/example.md", ContentType: "text/markdown"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateDirectUploadPlan: %v", err)
+		}
+		if plan.Provider != "oss" || plan.Bucket != "bucket" || plan.Owner != fx.owner.Handle {
+			t.Fatalf("plan identity = provider:%q bucket:%q owner:%q", plan.Provider, plan.Bucket, plan.Owner)
+		}
+		if len(plan.Files) != 2 {
+			t.Fatalf("files len = %d, want 2", len(plan.Files))
+		}
+		if plan.Files[0].Path != "SKILL.md" {
+			t.Fatalf("first path = %q, want sanitized SKILL.md", plan.Files[0].Path)
+		}
+		if got := plan.Files[0].Object.Key; got != "skills/"+fx.owner.Handle+"/demo/versions/1.0.0/files/SKILL.md" {
+			t.Fatalf("object key = %q", got)
+		}
+		if plan.Files[0].Object.Method != "PUT" || plan.Files[0].Object.URL == "" {
+			t.Fatalf("object URL not populated: %+v", plan.Files[0].Object)
+		}
+	})
+
+	t.Run("reuses matching uploaded objects", func(t *testing.T) {
+		t.Parallel()
+		fx := setupSkillFixtures(t)
+		fs := newFakeDirectStore()
+		fx.svc.fileStore = fs
+		skillMD := []byte("---\nname: demo\ndescription: existing\n---\n")
+		size := int64(len(skillMD))
+		fs.files[fs.ObjectKey(fx.owner.Handle, "demo", "1.0.0", "SKILL.md")] = skillMD
+
+		plan, err := fx.svc.CreateDirectUploadPlan(context.Background(), fx.owner, DirectUploadPlanRequest{
+			Slug:    "demo",
+			Version: "1.0.0",
+			Files: []DirectUploadFileRequest{
+				{Path: "SKILL.md", Size: &size, SHA256: sha256Hex(skillMD), ContentType: "text/markdown"},
+				{Path: "references/ref.md", ContentType: "text/markdown"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateDirectUploadPlan: %v", err)
+		}
+		if len(plan.Files) != 2 {
+			t.Fatalf("files len = %d, want 2", len(plan.Files))
+		}
+		if !plan.Files[0].Exists || plan.Files[0].Object != nil {
+			t.Fatalf("first file = %+v, want existing object without upload URL", plan.Files[0])
+		}
+		if plan.Files[1].Exists || plan.Files[1].Object == nil || plan.Files[1].Object.URL == "" {
+			t.Fatalf("second file = %+v, want upload URL", plan.Files[1])
+		}
+	})
+
+	t.Run("rejects duplicate version for existing skill", func(t *testing.T) {
+		t.Parallel()
+		fx := setupSkillFixtures(t)
+		fx.publishBaseSkill(t, "dup-direct", fx.owner)
+		fx.svc.fileStore = &fakeDirectStore{}
+
+		_, err := fx.svc.CreateDirectUploadPlan(context.Background(), fx.owner, DirectUploadPlanRequest{
+			Slug:    "dup-direct",
+			Version: "1.0.0",
+			Files:   []DirectUploadFileRequest{{Path: "SKILL.md"}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "already exists") {
+			t.Fatalf("CreateDirectUploadPlan error = %v, want duplicate version", err)
+		}
+	})
+}
+
+func TestSkillService_CompleteDirectUpload(t *testing.T) {
+	t.Parallel()
+
+	t.Run("publishes uploaded objects", func(t *testing.T) {
+		t.Parallel()
+		fx := setupSkillFixtures(t)
+		fs := newFakeDirectStore()
+		fx.svc.fileStore = fs
+
+		skillMD := []byte("---\nname: demo\ndescription: direct upload\n---\n# Demo\n")
+		ref := []byte("# Ref\n")
+		fs.files[fs.ObjectKey(fx.owner.Handle, "demo", "1.0.0", "SKILL.md")] = skillMD
+		fs.files[fs.ObjectKey(fx.owner.Handle, "demo", "1.0.0", "references/ref.md")] = ref
+
+		skill, version, err := fx.svc.CompleteDirectUpload(context.Background(), fx.owner, DirectUploadCompleteRequest{
+			Slug:    "demo",
+			Version: "1.0.0",
+			Files: []DirectUploadCompleteFile{
+				{Path: "SKILL.md", Size: int64(len(skillMD)), SHA256: sha256Hex(skillMD), ContentType: "text/markdown"},
+				{Path: "references/ref.md", Size: int64(len(ref)), SHA256: sha256Hex(ref), ContentType: "text/markdown"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CompleteDirectUpload: %v", err)
+		}
+		if skill == nil || version == nil || skill.Slug != "demo" || version.Version != "1.0.0" {
+			t.Fatalf("published skill=%+v version=%+v", skill, version)
+		}
+		got, err := fx.svc.GetFile(context.Background(), model.SkillRef{Namespace: skill.NamespaceSlug, Slug: "demo"}, "1.0.0", "SKILL.md", fx.owner)
+		if err != nil {
+			t.Fatalf("GetFile: %v", err)
+		}
+		if string(got) != string(skillMD) {
+			t.Fatalf("SKILL.md = %q", got)
+		}
+		if fs.publishCalls != 0 || fs.metaCalls != 1 {
+			t.Fatalf("store calls publish=%d meta=%d, want publish=0 meta=1", fs.publishCalls, fs.metaCalls)
+		}
+	})
+
+	t.Run("rejects checksum mismatch", func(t *testing.T) {
+		t.Parallel()
+		fx := setupSkillFixtures(t)
+		fs := newFakeDirectStore()
+		fx.svc.fileStore = fs
+		skillMD := []byte("---\nname: bad\ndescription: direct upload\n---\n# Bad\n")
+		fs.files[fs.ObjectKey(fx.owner.Handle, "bad", "1.0.0", "SKILL.md")] = skillMD
+
+		_, _, err := fx.svc.CompleteDirectUpload(context.Background(), fx.owner, DirectUploadCompleteRequest{
+			Slug:    "bad",
+			Version: "1.0.0",
+			Files: []DirectUploadCompleteFile{
+				{Path: "SKILL.md", Size: int64(len(skillMD)), SHA256: strings.Repeat("0", 64)},
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+			t.Fatalf("CompleteDirectUpload error = %v, want checksum mismatch", err)
+		}
+	})
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }

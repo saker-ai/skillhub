@@ -1,0 +1,28 @@
+{
+  "name": "@saker/skillhub-client",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SkillHub TypeScript client (API + types) shared across host shells",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./auth": "./src/auth.ts",
+    "./docs": "./src/docs.ts",
+    "./namespaces": "./src/namespaces.ts",
+    "./plugins": "./src/plugins.ts",
+    "./search": "./src/search.ts",
+    "./skills": "./src/skills.ts",
+    "./team-tokens": "./src/team-tokens.ts"
+  },
+  "dependencies": {
+    "@saker/web-shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

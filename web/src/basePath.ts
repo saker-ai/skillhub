@@ -1,4 +1,4 @@
-import { appAbsoluteURL, appBasePath, appURL } from '../../../web-shared/src/base-path';
+import { appAbsoluteURL, appBasePath, appURL } from '@saker/web-shared/base-path';
 
 export function skillHubBasePath(): string {
   return appBasePath(import.meta.env.BASE_URL);

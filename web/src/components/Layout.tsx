@@ -1,7 +1,7 @@
 import { Link, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
-import { logout } from '../api/auth';
+import { logout } from '@saker/skillhub-client/auth';
 import { skillHubURL } from '../basePath';
 import ThemeToggle from './ThemeToggle';
 import LangSwitch from './LangSwitch';

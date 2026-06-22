@@ -19,8 +19,10 @@ import (
 )
 
 const (
-	maxUploadFiles = 500
-	maxFileSize    = 5 * 1024 * 1024 // 5MB per file
+	maxUploadFiles                 = 500
+	maxFileSize                    = 5 * 1024 * 1024 // 5MB per file
+	directUploadMultipartThreshold = 64 << 20
+	directUploadMultipartPartSize  = 16 << 20
 )
 
 func derefStr(s *string) string {

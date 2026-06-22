@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/saker-ai/skillhub/pkg/gitstore"
@@ -157,11 +158,70 @@ type PublishRequest struct {
 	Files           map[string][]byte       // path → content
 	Dependencies    []model.SkillDependency // declared upstream skill deps
 	SignatureBundle []byte                  // optional sigstore .sigstore JSON
+	ObjectsUploaded bool                    // files already exist in DirectObjectStore final keys; write metadata only
 
 	// TokenNamespace 由 handler 透传当前请求 token 绑定的 namespace ID(*middleware.GetTokenNamespace*)。
 	// 非 nil ⇒ 团队 token,要求目标 skill 隶属该 namespace；不一致直接 403。
 	// nil ⇒ 个人 token / cookie 会话,沿用旧的 owner-ID 鉴权路径。
 	TokenNamespace *uuid.UUID
+}
+
+type DirectUploadFileRequest struct {
+	Path        string `json:"path"`
+	Size        *int64 `json:"size,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
+	ContentType string `json:"contentType"`
+}
+
+type DirectUploadPlanRequest struct {
+	Slug           string
+	Version        string
+	NamespaceSlug  string
+	Files          []DirectUploadFileRequest
+	TokenNamespace *uuid.UUID
+}
+
+type DirectUploadFile struct {
+	Path        string                       `json:"path"`
+	ContentType string                       `json:"contentType,omitempty"`
+	Exists      bool                         `json:"exists,omitempty"`
+	Object      *store.DirectObjectURL       `json:"object,omitempty"`
+	Multipart   *store.MultipartObjectUpload `json:"multipart,omitempty"`
+}
+
+type DirectUploadPlan struct {
+	Provider string             `json:"provider"`
+	Bucket   string             `json:"bucket"`
+	Owner    string             `json:"owner"`
+	Slug     string             `json:"slug"`
+	Version  string             `json:"version"`
+	Files    []DirectUploadFile `json:"files"`
+}
+
+type DirectUploadCompleteFile struct {
+	Path        string                      `json:"path"`
+	Size        int64                       `json:"size"`
+	SHA256      string                      `json:"sha256"`
+	ContentType string                      `json:"contentType"`
+	UploadID    string                      `json:"upload_id,omitempty"`
+	Parts       []store.CompletedUploadPart `json:"parts,omitempty"`
+}
+
+type DirectUploadCompleteRequest struct {
+	Slug            string
+	Version         string
+	Changelog       string
+	DisplayName     string
+	Summary         string
+	Category        string
+	Kind            string
+	Tags            []string
+	Visibility      string
+	NamespaceSlug   string
+	Files           []DirectUploadCompleteFile
+	Dependencies    []model.SkillDependency
+	SignatureBundle []byte
+	TokenNamespace  *uuid.UUID
 }
 
 // authorizeSkillWrite 判定 caller 是否可对 skill 做写操作。
@@ -418,9 +478,9 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		parsedJSON = model.JSONRaw(extractFrontmatter(content))
 	}
 
-	// Publish to git
+	// Publish files or finalize objects that were already uploaded directly.
 	email := user.Handle + "@skillhub.local"
-	commitHash, err := s.fileStore.Publish(ctx, store.PublishOpts{
+	publishOpts := store.PublishOpts{
 		Owner:   user.Handle,
 		Slug:    req.Slug,
 		Version: version,
@@ -428,9 +488,19 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		Author:  user.Handle,
 		Email:   email,
 		Message: req.Changelog,
-	})
+	}
+	var commitHash string
+	if req.ObjectsUploaded {
+		ds, ok := s.fileStore.(store.DirectObjectStore)
+		if !ok {
+			return nil, nil, fmt.Errorf("%w: direct upload is only available for object storage backends", ErrValidation)
+		}
+		commitHash, err = ds.PutMeta(ctx, publishOpts)
+	} else {
+		commitHash, err = s.fileStore.Publish(ctx, publishOpts)
+	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("git publish: %w", err)
+		return nil, nil, fmt.Errorf("publish files: %w", err)
 	}
 
 	// Serialize dependencies (default to empty array)
@@ -591,6 +661,275 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 	return skill, ver, nil
 }
 
+func (s *SkillService) CreateDirectUploadPlan(ctx context.Context, user *model.User, req DirectUploadPlanRequest) (*DirectUploadPlan, error) {
+	if user == nil {
+		return nil, fmt.Errorf("%w: authentication required", ErrForbidden)
+	}
+	ds, ok := s.fileStore.(store.DirectObjectStore)
+	if !ok {
+		return nil, fmt.Errorf("%w: direct upload is only available for object storage backends", ErrValidation)
+	}
+	if req.Slug == "" {
+		return nil, fmt.Errorf("slug is required")
+	}
+	if !semverRe.MatchString(req.Version) {
+		return nil, fmt.Errorf("invalid version '%s': must be valid semver (e.g. 1.0.0)", req.Version)
+	}
+	if len(req.Files) == 0 {
+		return nil, fmt.Errorf("files are required")
+	}
+	if len(req.Files) > maxUploadFiles {
+		return nil, fmt.Errorf("too many files (max %d)", maxUploadFiles)
+	}
+
+	ownerHandle := user.Handle
+	var nsID *uuid.UUID
+	if s.nsSvc == nil {
+		return nil, fmt.Errorf("namespace publishing not configured on this server")
+	}
+	if req.NamespaceSlug != "" {
+		ns, err := s.nsSvc.GetBySlug(ctx, req.NamespaceSlug)
+		if err != nil || ns == nil {
+			return nil, fmt.Errorf("namespace '%s' not found", req.NamespaceSlug)
+		}
+		can, err := s.nsSvc.CanPublish(ctx, req.NamespaceSlug, user.ID)
+		if err != nil {
+			return nil, fmt.Errorf("check namespace membership: %w", err)
+		}
+		if !can && !user.IsAdmin() {
+			return nil, fmt.Errorf("not a member of namespace '%s'", req.NamespaceSlug)
+		}
+		nsID = &ns.ID
+	} else {
+		ns, err := s.nsSvc.EnsurePersonalNamespace(ctx, user)
+		if err != nil {
+			return nil, fmt.Errorf("ensure personal namespace: %w", err)
+		}
+		nsID = &ns.ID
+	}
+	if req.TokenNamespace != nil && (nsID == nil || *nsID != *req.TokenNamespace) {
+		return nil, fmt.Errorf("%w: team token can only publish to its bound namespace", ErrForbidden)
+	}
+
+	skill, err := s.skillRepo.GetByNSAndSlug(ctx, *nsID, req.Slug)
+	if err != nil {
+		return nil, fmt.Errorf("get skill: %w", err)
+	}
+	if skill != nil {
+		if err := s.authorizeSkillWrite(ctx, skill.NamespaceID, skill.OwnerID, user, req.TokenNamespace); err != nil {
+			return nil, err
+		}
+		ownerHandle = skill.OwnerHandle
+		existing, err := s.versionRepo.GetBySkillAndVersion(ctx, skill.ID, req.Version)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			return nil, fmt.Errorf("version %s already exists", req.Version)
+		}
+		if latest, _ := s.versionRepo.GetLatest(ctx, skill.ID); latest != nil && semver.Compare(req.Version, latest.Version) <= 0 {
+			return nil, fmt.Errorf("version %s must be greater than current latest %s", req.Version, latest.Version)
+		}
+	}
+
+	const presignTTL = 15 * time.Minute
+	plan := &DirectUploadPlan{
+		Provider: ds.Provider(),
+		Owner:    ownerHandle,
+		Slug:     req.Slug,
+		Version:  req.Version,
+		Files:    make([]DirectUploadFile, 0, len(req.Files)),
+	}
+	seen := map[string]struct{}{}
+	for _, f := range req.Files {
+		cleanPath := sanitizeFilePath(f.Path)
+		if cleanPath == "" {
+			return nil, fmt.Errorf("invalid file path: %s", f.Path)
+		}
+		if _, dup := seen[cleanPath]; dup {
+			return nil, fmt.Errorf("duplicate file path: %s", cleanPath)
+		}
+		seen[cleanPath] = struct{}{}
+		if f.Size != nil && f.SHA256 != "" {
+			exists, err := s.directObjectMatches(ctx, ownerHandle, req.Slug, req.Version, cleanPath, *f.Size, f.SHA256)
+			if err != nil {
+				return nil, fmt.Errorf("verify existing object %s: %w", cleanPath, err)
+			}
+			if exists {
+				plan.Files = append(plan.Files, DirectUploadFile{
+					Path:        cleanPath,
+					ContentType: f.ContentType,
+					Exists:      true,
+				})
+				continue
+			}
+		}
+		if f.Size != nil && *f.Size >= directUploadMultipartThreshold {
+			ms, ok := s.fileStore.(store.MultipartObjectStore)
+			if ok {
+				mp, err := ms.CreateMultipartUpload(ctx, ownerHandle, req.Slug, req.Version, cleanPath, f.ContentType, *f.Size, directUploadMultipartPartSize, presignTTL)
+				if err != nil {
+					return nil, fmt.Errorf("create multipart upload URLs for %s: %w", cleanPath, err)
+				}
+				plan.Files = append(plan.Files, DirectUploadFile{
+					Path:        cleanPath,
+					ContentType: f.ContentType,
+					Multipart:   mp,
+				})
+				continue
+			}
+		}
+		obj, err := ds.PresignPut(ctx, ownerHandle, req.Slug, req.Version, cleanPath, f.ContentType, presignTTL)
+		if err != nil {
+			return nil, fmt.Errorf("create upload URL for %s: %w", cleanPath, err)
+		}
+		plan.Bucket = obj.Bucket
+		plan.Files = append(plan.Files, DirectUploadFile{
+			Path:        cleanPath,
+			ContentType: f.ContentType,
+			Object:      obj,
+		})
+	}
+	return plan, nil
+}
+
+func (s *SkillService) directObjectMatches(ctx context.Context, owner, slug, version, filePath string, size int64, sha256Hex string) (bool, error) {
+	if sha256Hex == "" {
+		return false, nil
+	}
+	content, err := s.fileStore.GetFile(ctx, owner, slug, version, filePath)
+	if err != nil {
+		return false, nil
+	}
+	if int64(len(content)) != size {
+		return false, nil
+	}
+	sum := sha256.Sum256(content)
+	return strings.EqualFold(hex.EncodeToString(sum[:]), sha256Hex), nil
+}
+
+func (s *SkillService) CompleteDirectUpload(ctx context.Context, user *model.User, req DirectUploadCompleteRequest) (*model.SkillWithOwner, *model.SkillVersion, error) {
+	if user == nil {
+		return nil, nil, fmt.Errorf("%w: authentication required", ErrForbidden)
+	}
+	ds, ok := s.fileStore.(store.DirectObjectStore)
+	if !ok {
+		return nil, nil, fmt.Errorf("%w: direct upload is only available for object storage backends", ErrValidation)
+	}
+	if req.Slug == "" {
+		return nil, nil, fmt.Errorf("slug is required")
+	}
+	if !semverRe.MatchString(req.Version) {
+		return nil, nil, fmt.Errorf("invalid version '%s': must be valid semver (e.g. 1.0.0)", req.Version)
+	}
+	if len(req.Files) == 0 {
+		return nil, nil, fmt.Errorf("files are required")
+	}
+	if len(req.Files) > maxUploadFiles {
+		return nil, nil, fmt.Errorf("too many files (max %d)", maxUploadFiles)
+	}
+
+	ownerHandle := user.Handle
+	if s.nsSvc == nil {
+		return nil, nil, fmt.Errorf("namespace publishing not configured on this server")
+	}
+	var nsID *uuid.UUID
+	if req.NamespaceSlug != "" {
+		ns, err := s.nsSvc.GetBySlug(ctx, req.NamespaceSlug)
+		if err != nil || ns == nil {
+			return nil, nil, fmt.Errorf("namespace '%s' not found", req.NamespaceSlug)
+		}
+		can, err := s.nsSvc.CanPublish(ctx, req.NamespaceSlug, user.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("check namespace membership: %w", err)
+		}
+		if !can && !user.IsAdmin() {
+			return nil, nil, fmt.Errorf("not a member of namespace '%s'", req.NamespaceSlug)
+		}
+		nsID = &ns.ID
+	} else {
+		ns, err := s.nsSvc.EnsurePersonalNamespace(ctx, user)
+		if err != nil {
+			return nil, nil, fmt.Errorf("ensure personal namespace: %w", err)
+		}
+		nsID = &ns.ID
+		req.NamespaceSlug = ns.Slug
+	}
+	if req.TokenNamespace != nil && (nsID == nil || *nsID != *req.TokenNamespace) {
+		return nil, nil, fmt.Errorf("%w: team token can only publish to its bound namespace", ErrForbidden)
+	}
+
+	if skill, err := s.skillRepo.GetByNSAndSlug(ctx, *nsID, req.Slug); err != nil {
+		return nil, nil, fmt.Errorf("get skill: %w", err)
+	} else if skill != nil {
+		if err := s.authorizeSkillWrite(ctx, skill.NamespaceID, skill.OwnerID, user, req.TokenNamespace); err != nil {
+			return nil, nil, err
+		}
+		ownerHandle = skill.OwnerHandle
+	}
+
+	files := make(map[string][]byte, len(req.Files))
+	seen := map[string]struct{}{}
+	for _, f := range req.Files {
+		cleanPath := sanitizeFilePath(f.Path)
+		if cleanPath == "" {
+			return nil, nil, fmt.Errorf("invalid file path: %s", f.Path)
+		}
+		if _, dup := seen[cleanPath]; dup {
+			return nil, nil, fmt.Errorf("duplicate file path: %s", cleanPath)
+		}
+		seen[cleanPath] = struct{}{}
+		if len(f.Parts) > 0 {
+			ms, ok := ds.(store.MultipartObjectStore)
+			if !ok {
+				return nil, nil, fmt.Errorf("%w: multipart direct upload is not available for this backend", ErrValidation)
+			}
+			uploadID := strings.TrimSpace(f.UploadID)
+			if uploadID == "" {
+				return nil, nil, fmt.Errorf("%w: multipart upload id is required for %s", ErrValidation, cleanPath)
+			}
+			if err := ms.CompleteMultipartUpload(ctx, ownerHandle, req.Slug, req.Version, cleanPath, uploadID, f.Parts); err != nil {
+				return nil, nil, fmt.Errorf("complete multipart upload %s: %w", cleanPath, err)
+			}
+		}
+		content, err := s.fileStore.GetFile(ctx, ownerHandle, req.Slug, req.Version, cleanPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read uploaded file %s: %w", cleanPath, err)
+		}
+		if f.Size >= 0 && f.Size != 0 && int64(len(content)) != f.Size {
+			return nil, nil, fmt.Errorf("%w: uploaded file %s size mismatch", ErrValidation, cleanPath)
+		}
+		if f.SHA256 != "" {
+			sum := sha256.Sum256(content)
+			if !strings.EqualFold(hex.EncodeToString(sum[:]), f.SHA256) {
+				return nil, nil, fmt.Errorf("%w: uploaded file %s checksum mismatch", ErrValidation, cleanPath)
+			}
+		}
+		files[cleanPath] = content
+	}
+	if _, ok := files["SKILL.md"]; !ok {
+		return nil, nil, fmt.Errorf("%w: SKILL.md is required", ErrValidation)
+	}
+
+	return s.PublishVersion(ctx, user, PublishRequest{
+		Slug:            req.Slug,
+		Version:         req.Version,
+		Changelog:       req.Changelog,
+		DisplayName:     req.DisplayName,
+		Summary:         req.Summary,
+		Category:        req.Category,
+		Kind:            req.Kind,
+		Tags:            req.Tags,
+		Visibility:      req.Visibility,
+		NamespaceSlug:   req.NamespaceSlug,
+		Files:           files,
+		Dependencies:    req.Dependencies,
+		SignatureBundle: req.SignatureBundle,
+		ObjectsUploaded: true,
+		TokenNamespace:  req.TokenNamespace,
+	})
+}
+
 // DownloadResult carries a zip archive plus metadata for ETag / filename.
 type DownloadResult struct {
 	Archive     io.ReadCloser
@@ -701,6 +1040,27 @@ func (s *SkillService) Download(ctx context.Context, ref model.SkillRef, version
 		Fingerprint: ver.Fingerprint,
 		Version:     ver.Version,
 	}, nil
+}
+
+func (s *SkillService) DirectDownloadFile(ctx context.Context, ref model.SkillRef, version, filePath string, viewer *model.User) (*store.DirectObjectURL, *model.SkillVersion, error) {
+	cleanPath := sanitizeFilePath(filePath)
+	if cleanPath == "" {
+		return nil, nil, fmt.Errorf("invalid file path")
+	}
+	ds, ok := s.fileStore.(store.DirectObjectStore)
+	if !ok {
+		return nil, nil, fmt.Errorf("%w: direct download is only available for object storage backends", ErrValidation)
+	}
+	skill, ver, err := s.ResolveVersion(ctx, ref, version, viewer)
+	if err != nil {
+		return nil, nil, err
+	}
+	const presignTTL = 15 * time.Minute
+	obj, err := ds.PresignGet(ctx, skill.OwnerHandle, skill.Slug, ver.Version, cleanPath, presignTTL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create download URL: %w", err)
+	}
+	return obj, ver, nil
 }
 
 // GetFile reads a single file from a skill version.

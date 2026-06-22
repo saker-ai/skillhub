@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthContext } from './hooks/useAuth';
-import { whoami, type User } from './api/auth';
+import { whoami, type User } from '@saker/skillhub-client/auth';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import Skills from './pages/Skills';

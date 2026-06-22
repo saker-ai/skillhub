@@ -4,7 +4,7 @@ VITE_BASE_PATH ?= ./
 
 # Build frontend (React + Vite)
 frontend:
-	cd web && npm install && VITE_BASE_PATH="$(VITE_BASE_PATH)" npm run build
+	cd web && pnpm install --prefer-offline && VITE_BASE_PATH="$(VITE_BASE_PATH)" npm run build
 
 # Build the skillhub binary (includes embedded frontend)
 build: frontend

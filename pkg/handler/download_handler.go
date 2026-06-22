@@ -38,6 +38,9 @@ func (h *DownloadHandler) loggerOrDefault() *slog.Logger {
 
 // Download handles GET /api/v1/download
 func (h *DownloadHandler) Download(c *gin.Context) {
+	if h.DirectFile(c) {
+		return
+	}
 	slug := c.Query("slug")
 	if slug == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "slug is required"})
@@ -79,6 +82,43 @@ func (h *DownloadHandler) Download(c *gin.Context) {
 	if _, err := io.Copy(c.Writer, result.Archive); err != nil {
 		h.loggerOrDefault().Error("download stream error", "slug", slug, "err", err)
 	}
+}
+
+// DirectFile handles GET /api/v1/download?direct=1&path=...
+func (h *DownloadHandler) DirectFile(c *gin.Context) bool {
+	if c.Query("direct") != "1" && c.Query("direct") != "true" {
+		return false
+	}
+	filePath := c.Query("path")
+	if filePath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required for direct download"})
+		return true
+	}
+	slug := c.Query("slug")
+	if slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "slug is required"})
+		return true
+	}
+	ref := model.SkillRef{Namespace: c.Query("namespace"), Slug: slug}
+	version := c.DefaultQuery("version", "latest")
+	viewer := middleware.GetUser(c)
+	obj, ver, err := h.svc.DirectDownloadFile(c.Request.Context(), ref, version, filePath, viewer)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return true
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"provider":    obj.Provider,
+		"bucket":      obj.Bucket,
+		"key":         obj.Key,
+		"method":      obj.Method,
+		"url":         obj.URL,
+		"headers":     obj.Headers,
+		"expiresAt":   obj.ExpiresAt,
+		"version":     ver.Version,
+		"fingerprint": ver.Fingerprint,
+	})
+	return true
 }
 
 // quoteETag wraps a fingerprint in quotes per RFC 7232.
