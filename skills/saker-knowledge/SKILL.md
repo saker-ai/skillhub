@@ -1,7 +1,7 @@
 ---
 name: saker-knowledge
 description: Use KnowHub domain knowledge through MCP before answering Saker architecture, product, operations, security, or agent-skill questions.
-allowed-tools: knowledge.list_domains, knowledge.search, knowledge.get_source, knowledge.list_providers, knowledge.validate_okf
+allowed-tools: knowledge.list_domains, knowledge.search, knowledge.ask, knowledge.get_source, knowledge.list_providers, knowledge.validate_okf
 keywords: [saker, knowhub, knowledge, architecture, operations, evidence, citations]
 user-invocable: true
 ---
@@ -26,6 +26,8 @@ Use another domain only when the question clearly belongs there or when `knowled
 - `ai-agent-skills`: skill authoring, agent runtime rules, evidence use.
 
 If the first search returns weak or missing evidence, refine once with a narrower query or a more specific domain before answering.
+
+Use `knowledge.ask` only when the caller explicitly wants a concise evidence-grounded answer facade from KnowHub. For implementation decisions, reviews, or multi-step reasoning, prefer `knowledge.search` first so you can inspect evidence directly.
 
 ## Evidence Rules
 
