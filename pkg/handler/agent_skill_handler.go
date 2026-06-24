@@ -3,7 +3,6 @@ package handler
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -222,7 +221,6 @@ type agentSkillDetail struct {
 	Status         string    `json:"Status"`
 	SkillhubID     string    `json:"SkillhubId"`
 	SkillMdContent string    `json:"SkillMdContent"`
-	Files          []string  `json:"Files,omitempty"`
 	GmtCreate      time.Time `json:"GmtCreate"`
 	GmtModified    time.Time `json:"GmtModified"`
 }
@@ -250,7 +248,7 @@ func mapSkillToAgentDetail(skill *model.SkillWithOwner, ver *model.SkillVersion,
 	if skill.SoftDeletedAt != nil {
 		status = "DELETED"
 	}
-	d := agentSkillDetail{
+	return agentSkillDetail{
 		ID:             skill.ID.String(),
 		Name:           skill.Slug,
 		Description:    stringOrEmpty(skill.Summary),
@@ -262,27 +260,6 @@ func mapSkillToAgentDetail(skill *model.SkillWithOwner, ver *model.SkillVersion,
 		GmtCreate:      skill.CreatedAt,
 		GmtModified:    skill.UpdatedAt,
 	}
-	if ver != nil {
-		d.Files = versionFileNames(ver)
-	}
-	return d
-}
-
-func versionFileNames(ver *model.SkillVersion) []string {
-	if ver == nil || len(ver.Files) == 0 {
-		return nil
-	}
-	var files []model.VersionFile
-	if err := json.Unmarshal(ver.Files, &files); err != nil || len(files) == 0 {
-		return nil
-	}
-	names := make([]string, 0, len(files))
-	for _, f := range files {
-		if f.Path != "" {
-			names = append(names, f.Path)
-		}
-	}
-	return names
 }
 
 func agentSkillhubID(skill *model.SkillWithOwner) string {
