@@ -248,14 +248,17 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 		authed.DELETE("/plugins/@:namespace/:slug/versions/:version/yank", s.h.plugin.UnyankVersion)
 	}
 
-	// Agent Skill API. Saker publishes learned/user-authored skills here.
-	// The legacy POST /api/v1/skills route remains above for compatibility.
+	// Agent Skill API. Saker publishes learned/user-authored skills here and
+	// loads skills dynamically via the GET endpoints.
 	agentSkills := r.Group("/api/agent")
 	agentSkills.Use(middleware.RequireAuth(s.idp))
 	agentSkills.Use(middleware.RequireScope())
-	agentSkills.Use(s.rateLimiter.RateLimit("write"))
 	{
-		agentSkills.POST("/skills", s.h.skill.Publish)
+		agentSkills.POST("/skills", s.rateLimiter.RateLimit("write"), s.h.skill.Publish)
+		agentSkills.GET("/skills", s.rateLimiter.RateLimit("read"), s.h.agentSkill.List)
+		agentSkills.GET("/skills/:id", s.rateLimiter.RateLimit("read"), s.h.agentSkill.Detail)
+		agentSkills.GET("/skills/:id/download", s.rateLimiter.RateLimit("download"), s.h.agentSkill.Download)
+		agentSkills.GET("/skills/:id/archive", s.rateLimiter.RateLimit("download"), s.h.agentSkill.Archive)
 	}
 
 	// Admin endpoints

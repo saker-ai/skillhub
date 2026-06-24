@@ -74,7 +74,8 @@ type handlers struct {
 	webhook   *handler.WebhookHandler
 	wellKnown *handler.WellKnownHandler
 	agent     *handler.AgentHandler
-	runtime   *handler.RuntimeSkillHandler
+	runtime    *handler.RuntimeSkillHandler
+	agentSkill *handler.AgentSkillHandler
 	webAuth   *handler.WebAuthHandler
 	openapi   *handler.OpenAPIHandler
 	plugin    *handler.PluginHandler
@@ -333,7 +334,8 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 		webhook:   handler.NewWebhookHandler(importSvc),
 		wellKnown: handler.NewWellKnownHandler(cfg),
 		agent:     handler.NewAgentHandler(authSvc, userRepo),
-		runtime:   handler.NewRuntimeSkillHandler(skillSvc),
+		runtime:    handler.NewRuntimeSkillHandler(skillSvc),
+		agentSkill: handler.NewAgentSkillHandler(skillSvc),
 		webAuth:   handler.NewWebAuthHandler(authSvc),
 		openapi:   handler.NewOpenAPIHandler(),
 		plugin:    handler.NewPluginHandler(pluginSvc),
@@ -399,6 +401,12 @@ func NewWithDeps(cfg *config.Config, deps Deps) (*Server, error) {
 //	hub.RegisterStatic(myEngine)        // 仅当需要 SkillHub 自带的 SPA 时
 //	myEngine.Run(...)                   // 由宿主自己监听
 func (s *Server) Run() error {
+	registration := startServiceDiscovery(context.Background(), s.logger, s.cfg)
+	defer func() {
+		if registration != nil {
+			_ = registration.Stop(context.Background())
+		}
+	}()
 	engine := s.NewDefaultEngine()
 
 	var routeRoot gin.IRouter = engine
