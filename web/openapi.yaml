@@ -151,12 +151,46 @@ paths:
                     example: [devops, security, data, frontend, backend, infra, testing, ai, general]
 
   /api/agent/skills:
+    get:
+      tags: [Skills]
+      summary: List agent-loadable skills
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - { name: page,     in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: Simplified skill list envelope
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:          { type: string }
+                        name:        { type: string }
+                        description: { type: string }
+                        type:        { type: string }
+                        nickname:    { type: string }
+                        status:      { type: string }
+                        skillhubId:  { type: string }
+                  pagination:
+                    type: object
+                    properties:
+                      pageSize: { type: integer }
+                      total:    { type: integer }
+                      hasMore:  { type: boolean }
+                  requestId: { type: string }
     post:
       tags: [Skills]
       summary: Publish a new skill version (multipart)
       description: |
         At least one file is required and `SKILL.md` must be present in the upload.
-        With a team token, the `namespace` field MUST equal the token's bound namespace.
+        With a team token, the token's bound namespace is used automatically.
       security: [{ BearerAuth: [] }, { CookieAuth: [] }]
       requestBody:
         required: true
@@ -169,31 +203,95 @@ paths:
                 slug:         { type: string, description: "Unique skill slug" }
                 version:      { type: string, description: "Semver, e.g. 0.1.0" }
                 displayName:  { type: string }
-                summary:      { type: string }
-                category:     { type: string }
-                kind:         { type: string }
-                visibility:   { type: string, enum: [public, private] }
-                namespace:    { type: string, description: "Namespace slug (required when using a team token)" }
-                changelog:    { type: string }
-                tags:         { type: string, description: "Comma- or semicolon-separated" }
-                dependencies: { type: string, description: "JSON array of {slug, versionRange}" }
-                signature:    { type: string, description: "Cosign bundle, max 64 KB" }
+                visibility:   { type: string, enum: [public, private, workspace] }
+                overwrite:    { type: string, enum: ["true", "false", "1", "0"] }
                 files:
                   type: array
                   items: { type: string, format: binary }
       responses:
+        "201":
+          description: Created skill + first version
+          content:
+            application/json:
+              schema: &agentPublishResponse
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      skill:
+                        type: object
+                        properties:
+                          slug: { type: string }
+                      version:
+                        type: object
+                        properties:
+                          version:     { type: string }
+                          fingerprint: { type: string }
+                  requestId: { type: string }
         "200":
-          description: Skill + new version
+          description: Existing skill + new version
+          content:
+            application/json:
+              schema: *agentPublishResponse
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/agent/skills/{id}:
+    get:
+      tags: [Skills]
+      summary: Get simplified agent skill detail
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Simplified skill detail envelope
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  skill:   { $ref: "#/components/schemas/Skill" }
-                  version: { $ref: "#/components/schemas/SkillVersion" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+                  data:
+                    type: object
+                    properties:
+                      id:          { type: string }
+                      name:        { type: string }
+                      description: { type: string }
+                      detail:      { type: string }
+                      type:        { type: string }
+                      nickname:    { type: string }
+                      skillhubId:  { type: string }
+                      skillMd:     { type: string }
+                  requestId: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/agent/skills/{id}/download:
+    get:
+      tags: [Skills]
+      summary: Download agent skill archive
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - { name: id,     in: path, required: true, schema: { type: string } }
+        - { name: format, in: query, schema: { type: string, enum: [json] } }
+      responses:
+        "302":
+          description: Redirect to the archive URL
+        "200":
+          description: JSON download URL when format=json
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      downloadUrl: { type: string }
+                  requestId: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/skills:
     get:

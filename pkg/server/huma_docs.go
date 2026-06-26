@@ -75,12 +75,10 @@ type docPluginDownloadInput struct {
 type docSkillPublishInput struct {
 	Slug        string `form:"slug" doc:"Skill slug" required:"true"`
 	Version     string `form:"version" doc:"Version" required:"true"`
-	Summary     string `form:"summary" doc:"Short summary" required:"false"`
-	Category    string `form:"category" doc:"Category" required:"false"`
-	Tags        string `form:"tags" doc:"Comma-separated tags" required:"false"`
-	Namespace   string `form:"namespace" doc:"Namespace slug" required:"false"`
-	SkillMD     []byte `form:"skill_md" contentType:"text/markdown" required:"false"`
-	SkillMDFile []byte `form:"file" contentType:"application/octet-stream" required:"false"`
+	DisplayName string `form:"displayName" doc:"Display name" required:"false"`
+	Visibility  string `form:"visibility" doc:"private, workspace, or public" required:"false"`
+	Overwrite   string `form:"overwrite" doc:"true/1 permits existing skills; false/0 rejects them" required:"false"`
+	Files       []byte `form:"files" contentType:"application/octet-stream" required:"true"`
 }
 
 type docPluginPublishInput struct {
@@ -199,6 +197,21 @@ type docSkillOutput struct {
 	}
 }
 
+type docAgentSkillPublishOutput struct {
+	Body struct {
+		Data struct {
+			Skill struct {
+				Slug string `json:"slug"`
+			} `json:"skill"`
+			Version struct {
+				Version     string `json:"version"`
+				Fingerprint string `json:"fingerprint"`
+			} `json:"version"`
+		} `json:"data"`
+		RequestID string `json:"requestId"`
+	}
+}
+
 type docSkillVersionsOutput struct {
 	Body struct {
 		Versions []model.SkillVersion `json:"versions"`
@@ -252,7 +265,7 @@ func registerOpenAPIDocs(api huma.API) {
 	registerDoc(doc, http.MethodGet, "/api/v1/search", "search", "skills", "Search skills", public, (*docSearchInput)(nil), (*docMapOutput)(nil))
 	registerDoc(doc, http.MethodGet, "/api/v1/categories", "categories", "skills", "List skill categories", public, (*struct{})(nil), (*docMapOutput)(nil))
 	registerDoc(doc, http.MethodGet, "/api/v1/skills", "skills-list", "skills", "List skills", public, (*docListInput)(nil), (*docSkillListOutput)(nil))
-	registerDoc(doc, http.MethodPost, "/api/agent/skills", "agent-skills-publish", "skills", "Publish skill", security, (*docSkillPublishInput)(nil), (*docSkillOutput)(nil))
+	registerDoc(doc, http.MethodPost, "/api/agent/skills", "agent-skills-publish", "skills", "Publish skill", security, (*docSkillPublishInput)(nil), (*docAgentSkillPublishOutput)(nil))
 	registerDoc(doc, http.MethodGet, "/api/v1/skills/{slug}", "skills-get", "skills", "Get skill", public, (*docSlugInput)(nil), (*docSkillOutput)(nil))
 	registerDoc(doc, http.MethodDelete, "/api/v1/skills/{slug}", "skills-delete", "skills", "Delete skill", security, (*docSlugInput)(nil), (*docOKOutput)(nil))
 	registerDoc(doc, http.MethodPost, "/api/v1/skills/{slug}/undelete", "skills-undelete", "skills", "Restore deleted skill", security, (*docSlugInput)(nil), (*docOKOutput)(nil))

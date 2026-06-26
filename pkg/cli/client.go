@@ -69,10 +69,24 @@ func (c *Client) getJSON(path string, out interface{}) error {
 func parseAPIError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
 	var errResp struct {
-		Error string `json:"error"`
+		Error any `json:"error"`
 	}
-	if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-		return fmt.Errorf("API error (%d): %s", resp.StatusCode, errResp.Error)
+	if json.Unmarshal(body, &errResp) == nil && errResp.Error != nil {
+		switch e := errResp.Error.(type) {
+		case string:
+			if e != "" {
+				return fmt.Errorf("API error (%d): %s", resp.StatusCode, e)
+			}
+		case map[string]any:
+			msg, _ := e["message"].(string)
+			code, _ := e["code"].(string)
+			if msg != "" && code != "" {
+				return fmt.Errorf("API error (%d): %s: %s", resp.StatusCode, code, msg)
+			}
+			if msg != "" {
+				return fmt.Errorf("API error (%d): %s", resp.StatusCode, msg)
+			}
+		}
 	}
 	return fmt.Errorf("API error (%d): %s", resp.StatusCode, string(body))
 }
@@ -180,18 +194,6 @@ func (c *Client) Publish(slug, version, summary, tags, changelog, category strin
 	if version != "" {
 		writer.WriteField("version", version)
 	}
-	if summary != "" {
-		writer.WriteField("summary", summary)
-	}
-	if tags != "" {
-		writer.WriteField("tags", tags)
-	}
-	if changelog != "" {
-		writer.WriteField("changelog", changelog)
-	}
-	if category != "" {
-		writer.WriteField("category", category)
-	}
 
 	for name, content := range files {
 		part, err := writer.CreateFormFile("files", name)
@@ -213,7 +215,7 @@ func (c *Client) Publish(slug, version, summary, tags, changelog, category strin
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, parseAPIError(resp)
 	}
 

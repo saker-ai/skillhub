@@ -566,7 +566,14 @@ func Publish(args []string) {
 		exitWithError(err.Error())
 	}
 
-	// Extract version info from result
+	// Extract version info from the Agent Skill API response.
+	if data, ok := result["data"].(map[string]interface{}); ok {
+		if vMap, ok := data["version"].(map[string]interface{}); ok {
+			printSuccess(fmt.Sprintf("Published %s@%s", slug, getStr(vMap, "version")))
+			return
+		}
+	}
+
 	if vMap, ok := result["version"].(map[string]interface{}); ok {
 		printSuccess(fmt.Sprintf("Published %s@%s", slug, getStr(vMap, "version")))
 	} else {

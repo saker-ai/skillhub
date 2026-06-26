@@ -197,6 +197,11 @@ func (s *NamespaceService) GetBySlug(ctx context.Context, slug string) (*model.N
 	return s.nsRepo.GetBySlug(ctx, slug)
 }
 
+// GetByID returns a namespace by ID.
+func (s *NamespaceService) GetByID(ctx context.Context, id uuid.UUID) (*model.Namespace, error) {
+	return s.nsRepo.GetByID(ctx, id)
+}
+
 // ListByUser returns all namespaces the user belongs to.
 func (s *NamespaceService) ListByUser(ctx context.Context, userID uuid.UUID) ([]model.Namespace, error) {
 	return s.nsRepo.ListByUser(ctx, userID)

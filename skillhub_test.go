@@ -1132,8 +1132,7 @@ func (h *hybridIDP) Identify(ctx context.Context, r *http.Request) (*model.User,
 
 // TestHub_TeamToken_PublishSkillE2E pins the P2-9 contract: a raw team token
 // returned by POST /api/v1/namespaces/:slug/tokens can actually be used as a
-// Bearer credential to publish a skill into that namespace, AND must be
-// rejected when used to publish elsewhere.
+// Bearer credential to publish a skill into that namespace.
 //
 // Coverage rationale:
 //   - The existing namespace-token tests (Lifecycle, ScopeAndExpiryValidation)
@@ -1152,11 +1151,10 @@ func (h *hybridIDP) Identify(ctx context.Context, r *http.Request) (*model.User,
 //     ultimately calls userRepo.GetByID(t.UserID).
 //  3. Bootstrap via X-Test-User: alice creates "acme" + "bystander" namespaces,
 //     and mints a publish-scope team token bound to "acme". Capture raw token.
-//  4. Positive case: POST /api/agent/skills with namespace=acme + the raw bearer
-//     → 200 OK; verify the resulting skill has NamespaceID == acme.ID.
-//  5. Negative case: same raw bearer + namespace=bystander → 400 with the
-//     "team token can only publish to its bound namespace" error from
-//     skill_service.go:222.
+//  4. Positive case: POST /api/agent/skills + the raw bearer → 201 Created;
+//     verify list/detail/download use the simplified Agent Skill API shape.
+//  5. The deprecated namespace form field is ignored; the token binding decides
+//     the target namespace.
 func TestHub_TeamToken_PublishSkillE2E(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tmp := t.TempDir()
@@ -1267,18 +1265,20 @@ func TestHub_TeamToken_PublishSkillE2E(t *testing.T) {
 	// namespace, SKILL.md) and POSTs it as the raw team token's bearer.
 	// SKILL.md is the only file PublishVersion specially extracts frontmatter
 	// from; the rest of the file map can be arbitrary.
-	publishMultipart := func(slug, version, nsSlug, bearer string) (int, []byte) {
+	publishMultipart := func(slug, version, nsSlug, bearer string, extra map[string]string) (int, []byte) {
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
 		_ = mw.WriteField("slug", slug)
 		_ = mw.WriteField("version", version)
-		_ = mw.WriteField("summary", "e2e test skill")
 		_ = mw.WriteField("namespace", nsSlug)
+		for k, v := range extra {
+			_ = mw.WriteField(k, v)
+		}
 		fw, err := mw.CreateFormFile("SKILL.md", "SKILL.md")
 		if err != nil {
 			t.Fatalf("CreateFormFile: %v", err)
 		}
-		_, _ = fw.Write([]byte("---\nname: e2e\n---\n# E2E\n"))
+		_, _ = fw.Write([]byte("---\nname: e2e\n---\n# E2E " + version + "\n"))
 		_ = mw.Close()
 
 		req := httptest.NewRequest(http.MethodPost, "/api/agent/skills", &buf)
@@ -1290,60 +1290,154 @@ func TestHub_TeamToken_PublishSkillE2E(t *testing.T) {
 	}
 
 	// 3) Positive case — publish to acme using the raw team token.
-	code, body = publishMultipart("e2e-acme-skill", "1.0.0", "acme", minted.Token)
-	if code != http.StatusOK {
+	code, body = publishMultipart("e2e-acme-skill", "1.0.0", "", minted.Token, map[string]string{
+		"displayName": "E2E Acme Skill",
+	})
+	if code != http.StatusCreated {
 		t.Fatalf("publish to acme: status=%d body=%s", code, body)
 	}
 	var pubResp struct {
-		Skill struct {
-			Slug        string  `json:"slug"`
-			NamespaceID *string `json:"namespaceId"`
-		} `json:"skill"`
+		Data struct {
+			Skill struct {
+				Slug string `json:"slug"`
+			} `json:"skill"`
+			Version struct {
+				Version     string `json:"version"`
+				Fingerprint string `json:"fingerprint"`
+			} `json:"version"`
+		} `json:"data"`
+		RequestID string `json:"requestId"`
 	}
 	if err := json.Unmarshal(body, &pubResp); err != nil {
 		t.Fatalf("unmarshal publish resp: %v body=%s", err, body)
 	}
-	if pubResp.Skill.Slug != "e2e-acme-skill" {
-		t.Errorf("published slug = %q, want e2e-acme-skill", pubResp.Skill.Slug)
+	if pubResp.Data.Skill.Slug != "e2e-acme-skill" {
+		t.Errorf("published slug = %q, want e2e-acme-skill", pubResp.Data.Skill.Slug)
 	}
-	// The skill's namespaceId MUST equal the team token's binding — that's
-	// the whole point of the team-token model. Comparing strings sidesteps
-	// JSON null vs missing field nuance.
-	if pubResp.Skill.NamespaceID == nil || *pubResp.Skill.NamespaceID != *minted.Metadata.NamespaceID {
-		t.Errorf("published skill namespaceId = %v, want %s",
-			pubResp.Skill.NamespaceID, *minted.Metadata.NamespaceID)
+	if pubResp.Data.Version.Version != "1.0.0" || pubResp.Data.Version.Fingerprint == "" {
+		t.Errorf("published version = %+v, want version + fingerprint", pubResp.Data.Version)
 	}
-
-	// 4) Negative case — same bearer, different (valid) namespace: must be
-	//    rejected by SkillService.PublishVersion's namespace-binding check.
-	//    We use a fresh slug so the "version exists" check can't shadow it.
-	//
-	//    Status MUST be 403 (not 400). The /skills.md guide and the
-	//    handler.writeServiceError mapper both depend on this: service-layer
-	//    errors prefixed with "forbidden:" surface as HTTP 403 so AI agents
-	//    reading the docs know "this is an authz failure, don't retry with
-	//    the same credential" rather than "fix your input and try again"
-	//    (P3-12).
-	code, body = publishMultipart("e2e-bystander-skill", "1.0.0", "bystander", minted.Token)
-	if code != http.StatusForbidden {
-		t.Errorf("publish to bystander: status = %d, want 403; body=%s", code, body)
-	}
-	if !strings.Contains(string(body), "team token can only publish to its bound namespace") {
-		t.Errorf("expected namespace-binding error, got status=%d body=%s", code, body)
-	}
-	if !strings.Contains(string(body), "forbidden:") {
-		t.Errorf("expected error to retain 'forbidden:' prefix for client classification, got body=%s", body)
+	if pubResp.RequestID == "" {
+		t.Error("publish response missing requestId")
 	}
 
-	// 5) Negative case — same bearer, no namespace at all (would create a
-	//    personal skill). Must also be rejected: a team token cannot publish
-	//    skills outside its bound namespace, including the "no namespace"
-	//    (personal) case. Same 403 contract as case 4.
-	code, body = publishMultipart("e2e-personal-skill", "1.0.0", "", minted.Token)
-	if code != http.StatusForbidden {
-		t.Errorf("publish without namespace: status = %d, want 403; body=%s", code, body)
+	agentGET := func(path string) (int, http.Header, []byte) {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+minted.Token)
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w.Code, w.Header(), w.Body.Bytes()
 	}
-	if !strings.Contains(string(body), "team token can only publish to its bound namespace") {
-		t.Errorf("expected namespace-binding error for empty namespace, got status=%d body=%s", code, body)
+
+	code, _, body = agentGET("/api/agent/skills?page=1&pageSize=20")
+	if code != http.StatusOK {
+		t.Fatalf("agent list: status=%d body=%s", code, body)
+	}
+	var listResp struct {
+		Data []struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Type        string `json:"type"`
+			Nickname    string `json:"nickname"`
+			Status      string `json:"status"`
+			SkillhubID  string `json:"skillhubId"`
+		} `json:"data"`
+		Pagination struct {
+			PageSize int  `json:"pageSize"`
+			Total    int  `json:"total"`
+			HasMore  bool `json:"hasMore"`
+		} `json:"pagination"`
+		RequestID string `json:"requestId"`
+	}
+	if err := json.Unmarshal(body, &listResp); err != nil {
+		t.Fatalf("unmarshal agent list: %v body=%s", err, body)
+	}
+	var skillID string
+	for _, item := range listResp.Data {
+		if item.Name == "e2e-acme-skill" {
+			skillID = item.ID
+			if item.SkillhubID != "@acme/e2e-acme-skill" {
+				t.Errorf("skillhubId = %q, want @acme/e2e-acme-skill", item.SkillhubID)
+			}
+			if item.Type != "custom" {
+				t.Errorf("type = %q, want custom", item.Type)
+			}
+		}
+	}
+	if skillID == "" {
+		t.Fatalf("published skill missing from agent list: %+v", listResp.Data)
+	}
+
+	code, _, body = agentGET("/api/agent/skills/" + skillID)
+	if code != http.StatusOK {
+		t.Fatalf("agent detail: status=%d body=%s", code, body)
+	}
+	var detailResp struct {
+		Data struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			SkillMd     string `json:"skillMd"`
+			SkillhubID  string `json:"skillhubId"`
+			Description string `json:"description"`
+		} `json:"data"`
+		RequestID string `json:"requestId"`
+	}
+	if err := json.Unmarshal(body, &detailResp); err != nil {
+		t.Fatalf("unmarshal agent detail: %v body=%s", err, body)
+	}
+	if detailResp.Data.ID != skillID || !strings.Contains(detailResp.Data.SkillMd, "name: e2e") {
+		t.Fatalf("unexpected detail response: %+v", detailResp.Data)
+	}
+
+	code, headers, _ := agentGET("/api/agent/skills/" + skillID + "/download")
+	if code != http.StatusFound {
+		t.Fatalf("agent download redirect: status=%d headers=%v", code, headers)
+	}
+	if loc := headers.Get("Location"); !strings.Contains(loc, "/api/agent/skills/"+skillID+"/archive") {
+		t.Fatalf("download Location = %q, want archive URL", loc)
+	}
+
+	code, _, body = agentGET("/api/agent/skills/" + skillID + "/download?format=json")
+	if code != http.StatusOK {
+		t.Fatalf("agent download json: status=%d body=%s", code, body)
+	}
+	var downloadResp struct {
+		Data struct {
+			DownloadURL string `json:"downloadUrl"`
+		} `json:"data"`
+		RequestID string `json:"requestId"`
+	}
+	if err := json.Unmarshal(body, &downloadResp); err != nil {
+		t.Fatalf("unmarshal download json: %v body=%s", err, body)
+	}
+	if !strings.Contains(downloadResp.Data.DownloadURL, "/api/agent/skills/"+skillID+"/archive") {
+		t.Fatalf("downloadUrl = %q, want archive URL", downloadResp.Data.DownloadURL)
+	}
+
+	code, body = publishMultipart("e2e-acme-skill", "1.0.1", "bystander", minted.Token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("publish second version with deprecated namespace ignored: status=%d body=%s", code, body)
+	}
+
+	code, body = publishMultipart("e2e-acme-skill", "1.0.2", "", minted.Token, map[string]string{"overwrite": "false"})
+	if code != http.StatusConflict {
+		t.Fatalf("publish overwrite=false: status=%d body=%s", code, body)
+	}
+	var conflictResp struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Details struct {
+				Slug string `json:"slug"`
+			} `json:"details"`
+		} `json:"error"`
+		RequestID string `json:"requestId"`
+	}
+	if err := json.Unmarshal(body, &conflictResp); err != nil {
+		t.Fatalf("unmarshal conflict: %v body=%s", err, body)
+	}
+	if conflictResp.Error.Code != "SKILL_NAME_CONFLICT" || conflictResp.Error.Details.Slug != "e2e-acme-skill" {
+		t.Fatalf("unexpected conflict response: %+v", conflictResp)
 	}
 }

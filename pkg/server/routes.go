@@ -254,7 +254,7 @@ func (s *Server) RegisterRoutes(r gin.IRouter) {
 	agentSkills.Use(middleware.RequireAuth(s.idp))
 	agentSkills.Use(middleware.RequireScope())
 	{
-		agentSkills.POST("/skills", s.rateLimiter.RateLimit("write"), s.h.skill.Publish)
+		agentSkills.POST("/skills", s.rateLimiter.RateLimit("write"), s.h.agentSkill.Publish)
 		agentSkills.GET("/skills", s.rateLimiter.RateLimit("read"), s.h.agentSkill.List)
 		agentSkills.GET("/skills/:id", s.rateLimiter.RateLimit("read"), s.h.agentSkill.Detail)
 		agentSkills.GET("/skills/:id/download", s.rateLimiter.RateLimit("download"), s.h.agentSkill.Download)

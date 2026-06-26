@@ -159,6 +159,7 @@ type PublishRequest struct {
 	Dependencies    []model.SkillDependency // declared upstream skill deps
 	SignatureBundle []byte                  // optional sigstore .sigstore JSON
 	ObjectsUploaded bool                    // files already exist in DirectObjectStore final keys; write metadata only
+	Overwrite       *bool                   // nil/true permits publishing a new version for an existing skill; false rejects existing skill names
 
 	// TokenNamespace 由 handler 透传当前请求 token 绑定的 namespace ID(*middleware.GetTokenNamespace*)。
 	// 非 nil ⇒ 团队 token,要求目标 skill 隶属该 namespace；不一致直接 403。
@@ -325,6 +326,13 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 			return nil, nil, fmt.Errorf("%w: not a member of namespace '%s'", ErrForbidden, req.NamespaceSlug)
 		}
 		resolvedNS = ns
+	} else if req.TokenNamespace != nil {
+		ns, err := s.nsSvc.GetByID(ctx, *req.TokenNamespace)
+		if err != nil || ns == nil {
+			return nil, nil, fmt.Errorf("%w: team token can only publish to its bound namespace", ErrForbidden)
+		}
+		resolvedNS = ns
+		req.NamespaceSlug = ns.Slug
 	} else {
 		ns, err := s.nsSvc.EnsurePersonalNamespace(ctx, user)
 		if err != nil {
@@ -426,6 +434,9 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 			OwnerHandle: user.Handle,
 		}
 	} else {
+		if req.Overwrite != nil && !*req.Overwrite {
+			return nil, nil, fmt.Errorf("%w: skill '%s' already exists", ErrConflict, req.Slug)
+		}
 		// Verify ownership / namespace token scoping.
 		if err := s.authorizeSkillWrite(ctx, skill.NamespaceID, skill.OwnerID, user, req.TokenNamespace); err != nil {
 			return nil, nil, err
@@ -438,7 +449,7 @@ func (s *SkillService) PublishVersion(ctx context.Context, user *model.User, req
 		return nil, nil, err
 	}
 	if existing != nil {
-		return nil, nil, fmt.Errorf("version %s already exists", version)
+		return nil, nil, fmt.Errorf("%w: version %s already exists", ErrConflict, version)
 	}
 
 	// Check version is greater than latest

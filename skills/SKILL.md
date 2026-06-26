@@ -131,16 +131,12 @@ curl -s -X POST "$REGISTRY/api/agent/skills" \
   -H "Authorization: Bearer $SKILLHUB_TOKEN" \
   -F "slug=my-skill" \
   -F "version=1.0.0" \
-  -F "category=devops" \
   -F "displayName=My Skill" \
-  -F "summary=A brief description" \
-  -F "tags=cli,automation" \
-  -F "changelog=Initial release" \
   -F "files=@./SKILL.md" \
   -F "files=@./script.sh"
 ```
 
-Form fields: `slug` (required), `version` (required, semver), `category`, `displayName`, `summary`, `tags` (comma/space/semicolon separated), `changelog`, `files` (repeatable, ≤50MB total).
+Form fields: `slug` (required), `version` (required, semver), `displayName`, `visibility`, `overwrite`, `files` (repeatable; `SKILL.md` required).
 
 Version must be strictly greater than the current latest. New skills default to `visibility=private`, `moderationStatus=approved`.
 
