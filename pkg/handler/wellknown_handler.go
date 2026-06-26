@@ -233,7 +233,8 @@ func renderInstallMarkdown(base string) string {
 	b.WriteString("Publishing through `/api/agent/skills` automatically uses the token's bound namespace; do not send the deprecated `namespace` form field.\n\n")
 
 	b.WriteString("## 6. Error and rate-limit conventions\n\n")
-	b.WriteString("- All errors are JSON: `{\"error\":\"<message>\"}`\n")
+	b.WriteString("- Registry v1 errors are JSON: `{\"error\":\"<message>\"}`\n")
+	b.WriteString("- Agent Skill API errors use `{\"error\":{\"code\":\"<CODE>\",\"message\":\"<message>\",\"details\":{...}},\"requestId\":\"...\"}`. Common codes: `INVALID_REQUEST`, `MISSING_FILES`, `INVALID_SKILL_MD`, `SKILL_NAME_CONFLICT`, `SKILL_NOT_FOUND`, `UNAUTHORIZED`, `FORBIDDEN`, `ARCHIVE_TOO_LARGE`, `BACKEND_ERROR`, `INTERNAL_ERROR`.\n")
 	b.WriteString("- `400` — bad request (malformed input, missing required field, validation failure)\n")
 	b.WriteString("- `401` — missing or invalid token (re-run device flow)\n")
 	b.WriteString("- `403` — authorization failure. Common causes:\n")

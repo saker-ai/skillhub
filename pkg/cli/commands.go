@@ -574,11 +574,7 @@ func Publish(args []string) {
 		}
 	}
 
-	if vMap, ok := result["version"].(map[string]interface{}); ok {
-		printSuccess(fmt.Sprintf("Published %s@%s", slug, getStr(vMap, "version")))
-	} else {
-		printSuccess(fmt.Sprintf("Published %s", slug))
-	}
+	printSuccess(fmt.Sprintf("Published %s", slug))
 }
 
 // PrintUsage prints CLI usage help.

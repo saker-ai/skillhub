@@ -274,13 +274,10 @@ paths:
       summary: Download agent skill archive
       security: [{ BearerAuth: [] }, { CookieAuth: [] }]
       parameters:
-        - { name: id,     in: path, required: true, schema: { type: string } }
-        - { name: format, in: query, schema: { type: string, enum: [json] } }
+        - { name: id, in: path, required: true, schema: { type: string } }
       responses:
-        "302":
-          description: Redirect to the archive URL
         "200":
-          description: JSON download URL when format=json
+          description: JSON download URL envelope
           content:
             application/json:
               schema:

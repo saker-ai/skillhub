@@ -117,8 +117,7 @@ func (h *AgentSkillHandler) Detail(c *gin.Context) {
 	})
 }
 
-// Download handles GET /api/agent/skills/:id/download. By default it redirects
-// to the archive endpoint; ?format=json returns a JSON envelope with the URL.
+// Download handles GET /api/agent/skills/:id/download.
 func (h *AgentSkillHandler) Download(c *gin.Context) {
 	id, err := uuid.Parse(strings.TrimSpace(c.Param("id")))
 	if err != nil {
@@ -142,17 +141,12 @@ func (h *AgentSkillHandler) Download(c *gin.Context) {
 	}
 	archiveURL := fmt.Sprintf("%s://%s/api/agent/skills/%s/archive", scheme, c.Request.Host, id.String())
 
-	if strings.EqualFold(c.Query("format"), "json") {
-		c.JSON(http.StatusOK, gin.H{
-			"data": gin.H{
-				"downloadUrl": archiveURL,
-			},
-			"requestId": agentRequestID(c),
-		})
-		return
-	}
-	c.Header(middleware.RequestIDHeader, agentRequestID(c))
-	c.Redirect(http.StatusFound, archiveURL)
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"downloadUrl": archiveURL,
+		},
+		"requestId": agentRequestID(c),
+	})
 }
 
 // Publish handles POST /api/agent/skills with the simplified Agent Skill API.

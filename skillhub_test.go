@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1320,6 +1321,7 @@ func TestHub_TeamToken_PublishSkillE2E(t *testing.T) {
 	if pubResp.RequestID == "" {
 		t.Error("publish response missing requestId")
 	}
+	assertJSONHasOnlyNewAgentKeys(t, body, "publish", []string{"data", "requestId"}, []string{"skill", "version"})
 
 	agentGET := func(path string) (int, http.Header, []byte) {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -1352,6 +1354,11 @@ func TestHub_TeamToken_PublishSkillE2E(t *testing.T) {
 	}
 	if err := json.Unmarshal(body, &listResp); err != nil {
 		t.Fatalf("unmarshal agent list: %v body=%s", err, body)
+	}
+	assertJSONHasOnlyNewAgentKeys(t, body, "list", []string{"data", "pagination", "requestId"}, nil)
+	if len(listResp.Data) > 0 {
+		itemRaw := agentJSONPath(t, body, "data").([]any)[0].(map[string]any)
+		rejectJSONKeys(t, itemRaw, "list item", "Id", "Name", "Description", "Type", "Nickname", "Status", "SkillhubId")
 	}
 	var skillID string
 	for _, item := range listResp.Data {
@@ -1386,19 +1393,14 @@ func TestHub_TeamToken_PublishSkillE2E(t *testing.T) {
 	if err := json.Unmarshal(body, &detailResp); err != nil {
 		t.Fatalf("unmarshal agent detail: %v body=%s", err, body)
 	}
+	assertJSONHasOnlyNewAgentKeys(t, body, "detail", []string{"data", "requestId"}, nil)
+	detailRaw := agentJSONPath(t, body, "data").(map[string]any)
+	rejectJSONKeys(t, detailRaw, "detail", "Id", "Name", "Description", "Detail", "Type", "Nickname", "Status", "SkillhubId", "SkillMdContent")
 	if detailResp.Data.ID != skillID || !strings.Contains(detailResp.Data.SkillMd, "name: e2e") {
 		t.Fatalf("unexpected detail response: %+v", detailResp.Data)
 	}
 
-	code, headers, _ := agentGET("/api/agent/skills/" + skillID + "/download")
-	if code != http.StatusFound {
-		t.Fatalf("agent download redirect: status=%d headers=%v", code, headers)
-	}
-	if loc := headers.Get("Location"); !strings.Contains(loc, "/api/agent/skills/"+skillID+"/archive") {
-		t.Fatalf("download Location = %q, want archive URL", loc)
-	}
-
-	code, _, body = agentGET("/api/agent/skills/" + skillID + "/download?format=json")
+	code, _, body = agentGET("/api/agent/skills/" + skillID + "/download")
 	if code != http.StatusOK {
 		t.Fatalf("agent download json: status=%d body=%s", code, body)
 	}
@@ -1411,8 +1413,25 @@ func TestHub_TeamToken_PublishSkillE2E(t *testing.T) {
 	if err := json.Unmarshal(body, &downloadResp); err != nil {
 		t.Fatalf("unmarshal download json: %v body=%s", err, body)
 	}
+	assertJSONHasOnlyNewAgentKeys(t, body, "download", []string{"data", "requestId"}, []string{"downloadUrl"})
 	if !strings.Contains(downloadResp.Data.DownloadURL, "/api/agent/skills/"+skillID+"/archive") {
 		t.Fatalf("downloadUrl = %q, want archive URL", downloadResp.Data.DownloadURL)
+	}
+
+	code, _, body = agentGET("/api/agent/skills/" + skillID + "/download?format=json")
+	if code != http.StatusOK {
+		t.Fatalf("agent download ignores format query: status=%d body=%s", code, body)
+	}
+	var downloadWithQuery struct {
+		Data struct {
+			DownloadURL string `json:"downloadUrl"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &downloadWithQuery); err != nil {
+		t.Fatalf("unmarshal download with query json: %v body=%s", err, body)
+	}
+	if downloadWithQuery.Data.DownloadURL != downloadResp.Data.DownloadURL {
+		t.Fatalf("downloadUrl with format query = %q, want %q", downloadWithQuery.Data.DownloadURL, downloadResp.Data.DownloadURL)
 	}
 
 	code, body = publishMultipart("e2e-acme-skill", "1.0.1", "bystander", minted.Token, nil)
@@ -1439,5 +1458,81 @@ func TestHub_TeamToken_PublishSkillE2E(t *testing.T) {
 	}
 	if conflictResp.Error.Code != "SKILL_NAME_CONFLICT" || conflictResp.Error.Details.Slug != "e2e-acme-skill" {
 		t.Fatalf("unexpected conflict response: %+v", conflictResp)
+	}
+}
+
+func assertJSONHasOnlyNewAgentKeys(t *testing.T, body []byte, label string, topKeys, dataKeys []string) {
+	t.Helper()
+	var root map[string]any
+	if err := json.Unmarshal(body, &root); err != nil {
+		t.Fatalf("unmarshal %s raw JSON: %v body=%s", label, err, body)
+	}
+	rejectJSONKeys(t, root, label, "RequestId", "Data", "Items", "Total", "Page", "PageSize", "DownloadUrl", "downloadUrl")
+	for _, key := range topKeys {
+		if _, ok := root[key]; !ok {
+			t.Fatalf("%s response missing top-level key %q: %v", label, key, root)
+		}
+	}
+	if len(dataKeys) == 0 {
+		return
+	}
+	data, ok := root["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s data is not an object: %T", label, root["data"])
+	}
+	for _, key := range dataKeys {
+		if _, ok := data[key]; !ok {
+			t.Fatalf("%s data missing key %q: %v", label, key, data)
+		}
+	}
+}
+
+func agentJSONPath(t *testing.T, body []byte, key string) any {
+	t.Helper()
+	var root map[string]any
+	if err := json.Unmarshal(body, &root); err != nil {
+		t.Fatalf("unmarshal raw JSON: %v body=%s", err, body)
+	}
+	v, ok := root[key]
+	if !ok {
+		t.Fatalf("missing JSON key %q in %v", key, root)
+	}
+	return v
+}
+
+func rejectJSONKeys(t *testing.T, obj map[string]any, label string, keys ...string) {
+	t.Helper()
+	for _, key := range keys {
+		if _, ok := obj[key]; ok {
+			t.Fatalf("%s response contains deprecated key %q: %v", label, key, obj)
+		}
+	}
+}
+
+func TestAgentSkillOpenAPIContract(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("web", "openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read openapi.yaml: %v", err)
+	}
+	text := string(body)
+	downloadPath := "/api/agent/skills/{id}/download:"
+	start := strings.Index(text, downloadPath)
+	if start < 0 {
+		t.Fatalf("openapi missing %s", downloadPath)
+	}
+	end := strings.Index(text[start+len(downloadPath):], "\n  /")
+	section := text[start:]
+	if end >= 0 {
+		section = text[start : start+len(downloadPath)+end]
+	}
+	for _, want := range []string{`"200":`, "downloadUrl", "requestId"} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("download OpenAPI section missing %q:\n%s", want, section)
+		}
+	}
+	for _, forbidden := range []string{`"302":`, "name: format"} {
+		if strings.Contains(section, forbidden) {
+			t.Fatalf("download OpenAPI section contains deprecated %q:\n%s", forbidden, section)
+		}
 	}
 }
