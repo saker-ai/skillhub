@@ -189,7 +189,7 @@ func (h *RuntimeSkillHandler) File(c *gin.Context) {
 		c.Status(http.StatusNotModified)
 		return
 	}
-	content, err := h.svc.GetFile(c.Request.Context(), skillRefFromSkill(*skill), ver.Version, filePath, middleware.GetUser(c))
+	content, err := h.svc.GetRuntimeFile(c.Request.Context(), skillRefFromSkill(*skill), ver.Version, filePath, middleware.GetUser(c))
 	if err != nil {
 		writeRuntimeErrorFromError(c, err)
 		return

@@ -1076,6 +1076,15 @@ func (s *SkillService) DirectDownloadFile(ctx context.Context, ref model.SkillRe
 
 // GetFile reads a single file from a skill version.
 func (s *SkillService) GetFile(ctx context.Context, ref model.SkillRef, version, filePath string, viewer *model.User) ([]byte, error) {
+	return s.getFile(ctx, ref, version, filePath, viewer, 512<<10)
+}
+
+// GetRuntimeFile permits bounded reference resources from the runtime manifest.
+// It retains the same current visibility checks as the legacy file reader.
+func (s *SkillService) GetRuntimeFile(ctx context.Context, ref model.SkillRef, version, filePath string, viewer *model.User) ([]byte, error) {
+	return s.getFile(ctx, ref, version, filePath, viewer, 5<<20)
+}
+func (s *SkillService) getFile(ctx context.Context, ref model.SkillRef, version, filePath string, viewer *model.User, maxBytes int) ([]byte, error) {
 	cleanPath := sanitizeFilePath(filePath)
 	if cleanPath == "" {
 		return nil, fmt.Errorf("invalid file path")
@@ -1107,11 +1116,8 @@ func (s *SkillService) GetFile(ctx context.Context, ref model.SkillRef, version,
 		return nil, err
 	}
 
-	// Runtime clients lazily fetch support files. Keep a conservative
-	// single-file cap while allowing markdown/reference files larger than the
-	// old UI-focused 200 KiB limit.
-	if len(content) > 512*1024 {
-		return nil, fmt.Errorf("file too large (max 512KB)")
+	if len(content) > maxBytes {
+		return nil, fmt.Errorf("file too large (max %d bytes)", maxBytes)
 	}
 	return content, nil
 }

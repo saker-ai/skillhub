@@ -993,3 +993,26 @@ func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
+
+func TestRuntimeFileSupportsBoundedReferencesWithoutWideningLegacyReads(t *testing.T) {
+	fx := setupSkillFixtures(t)
+	fs := newFakeDirectStore()
+	fx.svc.fileStore = fs
+	skill := fx.publishBaseSkill(t, "runtime-reference", fx.owner)
+	ref := model.SkillRef{Namespace: skill.NamespaceSlug, Slug: skill.Slug}
+	key := fs.ObjectKey(fx.owner.Handle, skill.Slug, "1.0.0", "references/large.md")
+	fs.files[key] = []byte(strings.Repeat("x", 1<<20))
+	if _, err := fx.svc.GetFile(t.Context(), ref, "1.0.0", "references/large.md", fx.owner); err == nil {
+		t.Fatal("legacy file limit widened")
+	}
+	if data, err := fx.svc.GetRuntimeFile(t.Context(), ref, "1.0.0", "references/large.md", fx.owner); err != nil || len(data) != 1<<20 {
+		t.Fatal("runtime reference rejected", err)
+	}
+	if _, err := fx.svc.GetRuntimeFile(t.Context(), ref, "1.0.0", "references/large.md", nil); err == nil {
+		t.Fatal("private reference disclosed")
+	}
+	fs.files[key] = []byte(strings.Repeat("x", (5<<20)+1))
+	if _, err := fx.svc.GetRuntimeFile(t.Context(), ref, "1.0.0", "references/large.md", fx.owner); err == nil {
+		t.Fatal("runtime file bound exceeded")
+	}
+}
