@@ -22,7 +22,7 @@ Self-hosted agent skill & plugin registry. Publish, version, and distribute agen
 
 ### Single Binary (Simplest)
 
-Prerequisites: Go 1.25+, Node.js 22+
+Prerequisites: Go 1.26.4 or newer (see `go.mod`), Node.js 22+
 
 ```bash
 git clone https://github.com/saker-ai/skillhub.git
@@ -392,3 +392,7 @@ To report a security vulnerability, please see [SECURITY.md](SECURITY.md).
 ## License
 
 [MIT](LICENSE)
+
+## Deployment boundary
+
+The sample admin passwords above are for local development only. Use unique credentials before exposing a registry. Plugin and skill distribution does not imply safe execution: review third-party bundles, MCP commands and requested credentials in the consuming agent environment.
