@@ -89,6 +89,7 @@ func buildMapping() mapping.IndexMapping {
 }
 
 type SkillDocument struct {
+	DocType          string   `json:"docType"`
 	ID               string   `json:"id"`
 	Slug             string   `json:"slug"`
 	DisplayName      string   `json:"displayName"`
@@ -112,6 +113,7 @@ type SkillDocument struct {
 // IndexSkill adds or updates a skill in the search index.
 func (c *Client) IndexSkill(ctx context.Context, doc *SkillDocument) error {
 	doc.OwnerHandleExact = doc.OwnerHandle
+	doc.DocType = "skill"
 	return c.index.Index(doc.ID, doc)
 }
 

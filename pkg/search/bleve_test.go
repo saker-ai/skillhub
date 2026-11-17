@@ -167,3 +167,31 @@ func TestClientPluginSearchAndDelete(t *testing.T) {
 		t.Fatalf("EstimatedTotal after delete = %d, want 0; hits=%v", result.EstimatedTotal, result.Hits)
 	}
 }
+
+func TestTypedSkillSearchPreservesPublicAndNamespaceBoundaries(t *testing.T) {
+	c := newTestClient(t)
+	ctx := t.Context()
+	for _, doc := range []*SkillDocument{
+		{ID: "public-skill", Slug: "find-me", NamespaceSlug: "my-team", Summary: "browser automation", Visibility: "public", ModerationStatus: "approved"},
+		{ID: "private-skill", Slug: "private", NamespaceSlug: "my-team", Summary: "browser automation", Visibility: "private", ModerationStatus: "approved"},
+		{ID: "other-team", Slug: "other", NamespaceSlug: "other-team", Summary: "browser automation", Visibility: "public", ModerationStatus: "approved"},
+	} {
+		if err := c.IndexSkill(ctx, doc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.IndexPlugin(ctx, &PluginDocument{ID: "public-plugin", Slug: "plugin", NamespaceSlug: "my-team", Summary: "browser automation", Visibility: "public", ModerationStatus: "approved"}); err != nil {
+		t.Fatal(err)
+	}
+	filters := append(publicSearchFilters("skill"), Filter{Field: "namespaceSlug", Value: "my-team"})
+	result, err := c.Search(ctx, "browser", 20, 0, nil, filters)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.EstimatedTotal != 1 || len(result.Hits) != 1 || result.Hits[0]["id"] != "public-skill" {
+		t.Fatalf("typed namespace search = %#v, want only public skill", result)
+	}
+	if result.Hits[0]["docType"] != "skill" {
+		t.Fatal("missing skill type")
+	}
+}
